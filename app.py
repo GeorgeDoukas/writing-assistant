@@ -1,5 +1,6 @@
 import os
 import re
+import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -147,26 +148,34 @@ THEMES = {
 
 
 class WritingAssistantApp:
+    _FONT_SIZES = [10, 12, 14, 16, 18, 20]
+
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Writing Assistant")
-        self.root.geometry("1000x680")
+        self.root.geometry("1000x700")
         self.theme_name = "dark"
         self.llm = LLMAssistant()
         self.auto_convert_var = tk.BooleanVar(value=True)
+        self.font_size = 11
+        self._llm_running = False
 
         self.tone_var = tk.StringVar(value="professional but friendly")
         self.style = ttk.Style()
+        self.style.theme_use("clam")  # allows full bg/fg overrides on Windows
         self._build_ui()
         self._apply_theme()
-        self.root.bind("<Control-l>", lambda _e: self.input_text.focus_set())
+        self.root.bind("<Control-l>", lambda _e: self._clear_input())
         self.root.bind("<Control-d>", lambda _e: self.toggle_theme())
         self.root.bind("<Control-Return>", lambda _e: self.convert_text())
+        self.root.bind("<Control-Shift-c>", lambda _e: self._copy_output())
+        self.root.bind("<Control-Shift-C>", lambda _e: self._copy_output())
 
     def _build_ui(self):
         self.container = ttk.Frame(self.root, padding=14)
         self.container.pack(fill=tk.BOTH, expand=True)
 
+        # ── Top bar ─────────────────────────────────────────────────────────
         top = ttk.Frame(self.container)
         top.pack(fill=tk.X)
 
@@ -174,8 +183,19 @@ class WritingAssistantApp:
         title.pack(side=tk.LEFT)
 
         ttk.Checkbutton(top, text="Auto convert", variable=self.auto_convert_var).pack(side=tk.LEFT, padx=10)
+
+        # Font size
+        font_frame = ttk.Frame(top)
+        font_frame.pack(side=tk.LEFT, padx=6)
+        ttk.Label(font_frame, text="Font:").pack(side=tk.LEFT)
+        ttk.Button(font_frame, text="−", width=2, command=self._font_decrease).pack(side=tk.LEFT)
+        self.font_size_label = ttk.Label(font_frame, text=str(self.font_size), width=3, anchor="center")
+        self.font_size_label.pack(side=tk.LEFT)
+        ttk.Button(font_frame, text="+", width=2, command=self._font_increase).pack(side=tk.LEFT)
+
         ttk.Button(top, text="Toggle Theme (Ctrl+D)", command=self.toggle_theme).pack(side=tk.RIGHT)
 
+        # ── Panes ────────────────────────────────────────────────────────────
         panes = ttk.Panedwindow(self.container, orient=tk.HORIZONTAL)
         panes.pack(fill=tk.BOTH, expand=True, pady=(12, 8))
 
@@ -184,14 +204,25 @@ class WritingAssistantApp:
         panes.add(left, weight=1)
         panes.add(right, weight=1)
 
-        ttk.Label(left, text="Greeklish Input").pack(anchor="w")
+        # Input side
+        input_header = ttk.Frame(left)
+        input_header.pack(fill=tk.X)
+        ttk.Label(input_header, text="Greeklish Input").pack(side=tk.LEFT)
+        ttk.Button(input_header, text="Clear (Ctrl+L)", command=self._clear_input).pack(side=tk.RIGHT)
+
         self.input_text = tk.Text(left, wrap=tk.WORD, height=24, undo=True)
         self.input_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
 
-        ttk.Label(right, text="Greek Output").pack(anchor="w")
+        # Output side
+        output_header = ttk.Frame(right)
+        output_header.pack(fill=tk.X)
+        ttk.Label(output_header, text="Greek Output").pack(side=tk.LEFT)
+        ttk.Button(output_header, text="Copy (Ctrl+Shift+C)", command=self._copy_output).pack(side=tk.RIGHT)
+
         self.output_text = tk.Text(right, wrap=tk.WORD, height=24, undo=True)
         self.output_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
 
+        # ── Action bar ───────────────────────────────────────────────────────
         actions = ttk.Frame(self.container)
         actions.pack(fill=tk.X, pady=(6, 0))
         ttk.Button(actions, text="Convert (Ctrl+↵)", command=self.convert_text).pack(side=tk.LEFT)
@@ -214,24 +245,59 @@ class WritingAssistantApp:
         )
         tone_combo.pack(side=tk.LEFT, padx=(4, 0))
 
-        ttk.Button(actions, text="LLM: Improve Tone", command=self.improve_with_llm).pack(side=tk.LEFT, padx=8)
-        ttk.Button(actions, text="Translate EN → EL", command=self.translate_en_el).pack(side=tk.LEFT, padx=4)
-        ttk.Button(actions, text="Translate EL → EN", command=self.translate_el_en).pack(side=tk.LEFT, padx=4)
+        self.llm_btn = ttk.Button(actions, text="LLM: Improve Tone", command=self.improve_with_llm)
+        self.llm_btn.pack(side=tk.LEFT, padx=8)
+        self.translate_en_el_btn = ttk.Button(actions, text="Translate EN → EL", command=self.translate_en_el)
+        self.translate_en_el_btn.pack(side=tk.LEFT, padx=4)
+        self.translate_el_en_btn = ttk.Button(actions, text="Translate EL → EN", command=self.translate_el_en)
+        self.translate_el_en_btn.pack(side=tk.LEFT, padx=4)
+
         ttk.Label(
             actions,
-            text="Ctrl+L: focus  |  Ctrl+D: theme",
+            text="Ctrl+L: clear  |  Ctrl+Shift+C: copy  |  Ctrl+D: theme",
             font=("Segoe UI", 9),
         ).pack(side=tk.RIGHT)
 
+        # ── Status bar ───────────────────────────────────────────────────────
+        status_bar = ttk.Frame(self.container)
+        status_bar.pack(fill=tk.X, pady=(6, 0))
+        self.status_label = ttk.Label(status_bar, text="Ready", font=("Segoe UI", 9))
+        self.status_label.pack(side=tk.LEFT)
+        self.word_count_label = ttk.Label(status_bar, text="", font=("Segoe UI", 9))
+        self.word_count_label.pack(side=tk.RIGHT)
+
         self.input_text.bind("<KeyRelease>", self._on_input_change)
+        self._update_text_font()
 
     def _apply_theme(self):
         theme = THEMES[self.theme_name]
         self.root.configure(bg=theme["bg"])
         self.style.configure("TFrame", background=theme["bg"])
         self.style.configure("TLabel", background=theme["bg"], foreground=theme["fg"])
-        self.style.configure("TButton", background=theme["card"], foreground=theme["fg"])
+        self.style.configure(
+            "TButton",
+            background=theme["card"],
+            foreground=theme["fg"],
+            bordercolor=theme["muted"],
+            darkcolor=theme["card"],
+            lightcolor=theme["card"],
+            relief="flat",
+            padding=(8, 4),
+        )
+        self.style.map(
+            "TButton",
+            background=[("active", theme["accent"]), ("disabled", theme["bg"])],
+            foreground=[("active", theme["bg"]), ("disabled", theme["muted"])],
+        )
         self.style.configure("TCheckbutton", background=theme["bg"], foreground=theme["fg"])
+        self.style.configure(
+            "TCombobox",
+            fieldbackground=theme["card"],
+            foreground=theme["fg"],
+            selectbackground=theme["accent"],
+            selectforeground=theme["bg"],
+        )
+        self.style.configure("TPanedwindow", background=theme["bg"])
         self.input_text.configure(
             bg=theme["card"],
             fg=theme["fg"],
@@ -253,7 +319,54 @@ class WritingAssistantApp:
         self.theme_name = "light" if self.theme_name == "dark" else "dark"
         self._apply_theme()
 
+    # ── Font helpers ─────────────────────────────────────────────────────────
+    def _update_text_font(self):
+        font = ("Segoe UI", self.font_size)
+        self.input_text.configure(font=font)
+        self.output_text.configure(font=font)
+        self.font_size_label.configure(text=str(self.font_size))
+
+    def _font_increase(self):
+        sizes = self._FONT_SIZES
+        if self.font_size < sizes[-1]:
+            self.font_size = sizes[sizes.index(self.font_size) + 1] if self.font_size in sizes else self.font_size + 2
+        self._update_text_font()
+
+    def _font_decrease(self):
+        sizes = self._FONT_SIZES
+        if self.font_size > sizes[0]:
+            self.font_size = sizes[sizes.index(self.font_size) - 1] if self.font_size in sizes else self.font_size - 2
+        self._update_text_font()
+
+    # ── Clipboard / clear ────────────────────────────────────────────────────
+    def _copy_output(self):
+        text = self.output_text.get("1.0", tk.END).rstrip("\n")
+        if text:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self._set_status("Output copied to clipboard.")
+
+    def _clear_input(self):
+        self.input_text.delete("1.0", tk.END)
+        self.output_text.delete("1.0", tk.END)
+        self._update_word_count("")
+        self._set_status("Cleared.")
+
+    # ── Status bar ───────────────────────────────────────────────────────────
+    def _set_status(self, message: str, after_ms: int = 3000):
+        self.status_label.configure(text=message)
+        if after_ms:
+            self.root.after(after_ms, lambda: self.status_label.configure(text="Ready"))
+
+    def _update_word_count(self, text: str):
+        words = len(text.split()) if text.strip() else 0
+        chars = len(text)
+        self.word_count_label.configure(text=f"{words} words  {chars} chars")
+
+    # ── Input change ─────────────────────────────────────────────────────────
     def _on_input_change(self, _event=None):
+        text = self.input_text.get("1.0", tk.END).rstrip("\n")
+        self._update_word_count(text)
         if self.auto_convert_var.get():
             self.convert_text()
 
@@ -263,16 +376,42 @@ class WritingAssistantApp:
         self.output_text.delete("1.0", tk.END)
         self.output_text.insert("1.0", converted)
 
+    # ── LLM helpers (threaded) ───────────────────────────────────────────────
+    def _set_llm_buttons_state(self, state: str):
+        for btn in (self.llm_btn, self.translate_en_el_btn, self.translate_el_en_btn):
+            btn.configure(state=state)
+
     def _llm_action(self, action):
-        try:
-            result = action()
-            self.output_text.delete("1.0", tk.END)
-            self.output_text.insert("1.0", result)
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror(
-                "LLM unavailable",
-                f"{exc}\n\nSet OPENAI_API_KEY and install langchain-openai to use this action.",
-            )
+        if self._llm_running:
+            return
+        self._llm_running = True
+        self._set_llm_buttons_state("disabled")
+        self._set_status("⏳ LLM working…", after_ms=0)
+
+        def _run():
+            try:
+                result = action()
+                self.root.after(0, lambda: self._llm_done(result))
+            except Exception as exc:  # noqa: BLE001
+                self.root.after(0, lambda: self._llm_error(exc))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _llm_done(self, result: str):
+        self.output_text.delete("1.0", tk.END)
+        self.output_text.insert("1.0", result)
+        self._llm_running = False
+        self._set_llm_buttons_state("normal")
+        self._set_status("Done.")
+
+    def _llm_error(self, exc: Exception):
+        self._llm_running = False
+        self._set_llm_buttons_state("normal")
+        self._set_status("LLM error — see dialog.")
+        messagebox.showerror(
+            "LLM unavailable",
+            f"{exc}\n\nSet OPENAI_API_KEY and install langchain-openai to use this action.",
+        )
 
     def improve_with_llm(self):
         text = self.output_text.get("1.0", tk.END).rstrip("\n") or self.input_text.get("1.0", tk.END).rstrip("\n")
