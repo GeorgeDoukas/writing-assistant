@@ -5,10 +5,7 @@ from tkinter import messagebox, ttk
 
 
 GREEKLISH_MULTI = {
-    "th": "θ",
     "ps": "ψ",
-    "ch": "χ",
-    "ks": "ξ",
     "ou": "ου",
     "ai": "αι",
     "ei": "ει",
@@ -24,30 +21,30 @@ GREEKLISH_MULTI = {
 GREEKLISH_SINGLE = {
     "a": "α",
     "b": "β",
-    "c": "κ",
+    "v": "β",
+    "g": "γ",
     "d": "δ",
     "e": "ε",
-    "f": "φ",
-    "g": "γ",
+    "z": "ζ",
     "h": "η",
+    "8": "θ",
     "i": "ι",
-    "j": "τζ",
     "k": "κ",
     "l": "λ",
     "m": "μ",
     "n": "ν",
+    "3": "ξ",
     "o": "ο",
     "p": "π",
-    "q": "κ",
     "r": "ρ",
     "s": "σ",
     "t": "τ",
     "u": "υ",
-    "v": "β",
-    "w": "ω",
-    "x": "ξ",
     "y": "υ",
-    "z": "ζ",
+    "f": "φ",
+    "x": "χ",
+    "w": "ω",
+    "?": ";"
 }
 
 
@@ -158,11 +155,13 @@ class WritingAssistantApp:
         self.llm = LLMAssistant()
         self.auto_convert_var = tk.BooleanVar(value=True)
 
+        self.tone_var = tk.StringVar(value="professional but friendly")
         self.style = ttk.Style()
         self._build_ui()
         self._apply_theme()
         self.root.bind("<Control-l>", lambda _e: self.input_text.focus_set())
         self.root.bind("<Control-d>", lambda _e: self.toggle_theme())
+        self.root.bind("<Control-Return>", lambda _e: self.convert_text())
 
     def _build_ui(self):
         self.container = ttk.Frame(self.root, padding=14)
@@ -195,13 +194,32 @@ class WritingAssistantApp:
 
         actions = ttk.Frame(self.container)
         actions.pack(fill=tk.X, pady=(6, 0))
-        ttk.Button(actions, text="Convert", command=self.convert_text).pack(side=tk.LEFT)
+        ttk.Button(actions, text="Convert (Ctrl+↵)", command=self.convert_text).pack(side=tk.LEFT)
+
+        tone_frame = ttk.Frame(actions)
+        tone_frame.pack(side=tk.LEFT, padx=8)
+        ttk.Label(tone_frame, text="Tone:").pack(side=tk.LEFT)
+        tone_combo = ttk.Combobox(
+            tone_frame,
+            textvariable=self.tone_var,
+            values=[
+                "professional but friendly",
+                "formal",
+                "casual",
+                "academic",
+                "persuasive",
+            ],
+            state="readonly",
+            width=22,
+        )
+        tone_combo.pack(side=tk.LEFT, padx=(4, 0))
+
         ttk.Button(actions, text="LLM: Improve Tone", command=self.improve_with_llm).pack(side=tk.LEFT, padx=8)
-        ttk.Button(actions, text="Translate EN -> EL", command=self.translate_en_el).pack(side=tk.LEFT, padx=8)
-        ttk.Button(actions, text="Translate EL -> EN", command=self.translate_el_en).pack(side=tk.LEFT)
+        ttk.Button(actions, text="Translate EN → EL", command=self.translate_en_el).pack(side=tk.LEFT, padx=4)
+        ttk.Button(actions, text="Translate EL → EN", command=self.translate_el_en).pack(side=tk.LEFT, padx=4)
         ttk.Label(
             actions,
-            text="Shortcut: Ctrl+L focus input",
+            text="Ctrl+L: focus  |  Ctrl+D: theme",
             font=("Segoe UI", 9),
         ).pack(side=tk.RIGHT)
 
@@ -258,7 +276,8 @@ class WritingAssistantApp:
 
     def improve_with_llm(self):
         text = self.output_text.get("1.0", tk.END).rstrip("\n") or self.input_text.get("1.0", tk.END).rstrip("\n")
-        self._llm_action(lambda: self.llm.improve_greek(text=text, tone="professional but friendly"))
+        tone = self.tone_var.get()
+        self._llm_action(lambda: self.llm.improve_greek(text=text, tone=tone))
 
     def translate_en_el(self):
         text = self.input_text.get("1.0", tk.END).rstrip("\n")
