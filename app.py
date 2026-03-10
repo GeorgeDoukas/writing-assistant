@@ -91,6 +91,11 @@ def second_pass_corrections(text: str) -> str:
     return corrected
 
 
+# LM Studio default endpoint — override with env vars if needed
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "local-model")
+
+
 class LLMAssistant:
     def __init__(self) -> None:
         self._llm = None
@@ -98,12 +103,16 @@ class LLMAssistant:
     def _get_llm(self):
         if self._llm:
             return self._llm
-        model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         try:
             from langchain_openai import ChatOpenAI
         except Exception as exc:  # noqa: BLE001
-            raise RuntimeError("Install langchain-openai to enable LLM features.") from exc
-        self._llm = ChatOpenAI(model=model_name, temperature=0.2)
+            raise RuntimeError("Install langchain-openai: pip install langchain-openai") from exc
+        self._llm = ChatOpenAI(
+            base_url=OPENAI_BASE_URL,
+            api_key="lm-studio",  # LM Studio ignores the key but the field is required
+            model=OPENAI_MODEL,
+            temperature=0.2,
+        )
         return self._llm
 
     def _invoke(self, system_prompt: str, user_text: str) -> str:
@@ -182,7 +191,7 @@ class WritingAssistantApp:
         title = ttk.Label(top, text="Greek Writing Assistant", font=("Segoe UI", 14, "bold"))
         title.pack(side=tk.LEFT)
 
-        ttk.Checkbutton(top, text="Auto convert", variable=self.auto_convert_var).pack(side=tk.LEFT, padx=10)
+        ttk.Checkbutton(top, text="Auto convert", variable=self.auto_convert_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=10)
 
         # Font size
         font_frame = ttk.Frame(top)
@@ -242,6 +251,7 @@ class WritingAssistantApp:
             ],
             state="readonly",
             width=22,
+            style="Card.TCombobox",
         )
         tone_combo.pack(side=tk.LEFT, padx=(4, 0))
 
@@ -290,12 +300,36 @@ class WritingAssistantApp:
             foreground=[("active", theme["bg"]), ("disabled", theme["muted"])],
         )
         self.style.configure("TCheckbutton", background=theme["bg"], foreground=theme["fg"])
+        # Checkbutton that sits on a card/button row — same bg as buttons
         self.style.configure(
-            "TCombobox",
-            fieldbackground=theme["card"],
+            "Card.TCheckbutton",
+            background=theme["card"],
             foreground=theme["fg"],
+            indicatorbackground=theme["bg"],
+            indicatorforeground=theme["accent"],
+        )
+        self.style.map(
+            "Card.TCheckbutton",
+            background=[("active", theme["card"])],
+            foreground=[("active", theme["fg"])],
+        )
+        # Combobox styled to match buttons
+        self.style.configure(
+            "Card.TCombobox",
+            fieldbackground=theme["card"],
+            background=theme["card"],
+            foreground=theme["fg"],
+            arrowcolor=theme["fg"],
+            bordercolor=theme["muted"],
             selectbackground=theme["accent"],
             selectforeground=theme["bg"],
+            padding=(6, 4),
+        )
+        self.style.map(
+            "Card.TCombobox",
+            fieldbackground=[("readonly", theme["card"])],
+            foreground=[("readonly", theme["fg"])],
+            background=[("active", theme["card"]), ("readonly", theme["card"])],
         )
         self.style.configure("TPanedwindow", background=theme["bg"])
         self.input_text.configure(
@@ -410,7 +444,10 @@ class WritingAssistantApp:
         self._set_status("LLM error — see dialog.")
         messagebox.showerror(
             "LLM unavailable",
-            f"{exc}\n\nSet OPENAI_API_KEY and install langchain-openai to use this action.",
+            f"{exc}\n\nMake sure LM Studio is running and a model is loaded.\n"
+            f"Endpoint: {OPENAI_BASE_URL}\n\n"
+            "Install dependency: pip install langchain-openai\n"
+            "Override endpoint: set LM_STUDIO_BASE_URL env var.",
         )
 
     def improve_with_llm(self):
