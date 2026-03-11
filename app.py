@@ -149,20 +149,29 @@ class LLMAssistant:
 
     def improve_greek(self, text: str, tone: str) -> str:
         return self._invoke(
-            f"Improve grammar and clarity in Greek. Keep meaning and output only Greek text with {tone} tone.",
+            f"You are a professional Greek text editor. "
+            f"Fix grammar, syntax, and clarity while strictly preserving the original meaning. "
+            f"Apply a '{tone}' tone throughout. "
+            f"Return ONLY the corrected Greek text — no explanations, no markdown, no introductory phrases.",
             text,
         )
 
     def tonify(self, text: str) -> str:
         return self._invoke(
-            "You are a Greek orthography assistant. Add the correct accent mark (τόνος) to every Greek word that needs one. "
-            "Return ONLY the corrected Greek text — no explanations, no extra lines, no markdown.",
+            "You are a Greek orthography specialist. "
+            "Add the correct accent marks to every word that requires one, "
+            "following the modern monotonic system. "
+            "Do NOT change any word, word order, or punctuation — only add or correct accents. "
+            "Return ONLY the accented text — no explanations, no markdown.",
             text,
         )
 
     def translate(self, text: str, source_lang: str, target_lang: str) -> str:
         return self._invoke(
-            f"Translate from {source_lang} to {target_lang}. Return only translated text.",
+            f"You are a professional translator. "
+            f"Translate the following text from {source_lang} to {target_lang}. "
+            f"Preserve the style, tone, and structure of the original as closely as possible. "
+            f"Return ONLY the translation — no explanations, no markdown, no introductory phrases.",
             text,
         )
 
