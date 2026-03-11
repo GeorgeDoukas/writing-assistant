@@ -51,6 +51,15 @@ GREEKLISH_SINGLE = {
     "?": ";"
 }
 
+TONE_MAPPING = {
+    "Επαγγελματικός αλλά φιλικός": "professional but friendly",
+    "Επίσημος": "formal",
+    "Περιστασιακός": "casual",
+    "Ακαδημαϊκός": "academic",
+    "Πειστικός": "persuasive",
+    "Μόνο διόρθωση γραμματικής": "correct grammar only, no tone changes",
+}
+
 
 def _preserve_case(source: str, target: str) -> str:
     if source.isupper():
@@ -199,8 +208,9 @@ class WritingAssistantApp:
 
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Writing Assistant")
-        self.root.geometry("1000x700")
+        self.root.title("Ελληνικός Βοηθός Γραφής")
+        self.root.geometry("1111x690")
+        self.root.minsize(1111, 690)
         self.theme_name = "dark"
         self.llm = LLMAssistant()
         self.auto_convert_var = tk.BooleanVar(value=True)
@@ -209,7 +219,8 @@ class WritingAssistantApp:
         self.font_size = 11
         self._llm_running = False
 
-        self.tone_var = tk.StringVar(value="professional but friendly")
+        self.tone_var = tk.StringVar(value="Μόνο διόρθωση γραμματικής")
+        self.target_lang_var = tk.StringVar(value="English")
         self.style = ttk.Style()
         self.style.theme_use("clam")  # allows full bg/fg overrides on Windows
         self._build_ui()
@@ -221,6 +232,9 @@ class WritingAssistantApp:
         self.root.bind("<Control-Shift-C>", lambda _e: self._copy_output())
         self.root.bind("<Control-t>", lambda _e: self.tonify_text())
         self.root.bind("<Control-T>", lambda _e: self.tonify_text())
+        self.root.bind("<Control-i>", lambda _e: self.improve_with_llm())
+        self.root.bind("<Control-I>", lambda _e: self.improve_with_llm())
+        self.root.bind("<Configure>", self._on_window_resize)
 
     def _build_ui(self):
         self.container = ttk.Frame(self.root, padding=14)
@@ -228,27 +242,31 @@ class WritingAssistantApp:
 
         # ── Top bar ─────────────────────────────────────────────────────────
         top = ttk.Frame(self.container)
-        top.pack(fill=tk.X)
+        top.pack(fill=tk.X, side=tk.TOP)
 
-        title = ttk.Label(top, text="Greek Writing Assistant", font=("Segoe UI", 14, "bold"))
+        title = ttk.Label(top, text="Ελληνικός Βοηθός Γραφής", font=("Segoe UI", 14, "bold"))
         title.pack(side=tk.LEFT)
 
-        ttk.Checkbutton(top, text="Auto convert", variable=self.auto_convert_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=10)
-        ttk.Checkbutton(top, text="Auto-tonify (5s)", variable=self.auto_tonify_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Checkbutton(top, text="Αυτόματη μετατροπή", variable=self.auto_convert_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=10)
+        ttk.Checkbutton(top, text="Αυτόματη τονικότητα (5δ)", variable=self.auto_tonify_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=(0, 10))
 
         # Font size
         font_frame = ttk.Frame(top)
         font_frame.pack(side=tk.LEFT, padx=6)
-        ttk.Label(font_frame, text="Font:").pack(side=tk.LEFT)
+        ttk.Label(font_frame, text="Γραμματοσειρά:").pack(side=tk.LEFT)
         ttk.Button(font_frame, text="−", width=2, command=self._font_decrease).pack(side=tk.LEFT)
         self.font_size_label = ttk.Label(font_frame, text=str(self.font_size), width=3, anchor="center")
         self.font_size_label.pack(side=tk.LEFT)
         ttk.Button(font_frame, text="+", width=2, command=self._font_increase).pack(side=tk.LEFT)
 
-        ttk.Button(top, text="Toggle Theme (Ctrl+D)", command=self.toggle_theme).pack(side=tk.RIGHT)
+        ttk.Button(top, text="Εναλλαγή θέματος (Ctrl+D)", command=self.toggle_theme).pack(side=tk.RIGHT, padx=(0, 8))
+
+        # ── Middle frame (expands to fill space) ──────────────────────────────
+        middle = ttk.Frame(self.container)
+        middle.pack(fill=tk.BOTH, expand=True, side=tk.TOP)
 
         # ── Panes ────────────────────────────────────────────────────────────
-        panes = ttk.Panedwindow(self.container, orient=tk.HORIZONTAL)
+        panes = ttk.Panedwindow(middle, orient=tk.HORIZONTAL)
         panes.pack(fill=tk.BOTH, expand=True, pady=(12, 8))
 
         left = ttk.Frame(panes, padding=8)
@@ -259,67 +277,94 @@ class WritingAssistantApp:
         # Input side
         input_header = ttk.Frame(left)
         input_header.pack(fill=tk.X)
-        ttk.Label(input_header, text="Greeklish Input").pack(side=tk.LEFT)
-        ttk.Button(input_header, text="Clear (Ctrl+L)", command=self._clear_input).pack(side=tk.RIGHT)
+        ttk.Label(input_header, text="Είσοδος Greeklish").pack(side=tk.LEFT)
+        ttk.Button(input_header, text="Κατάργηση (Ctrl+L)", command=self._clear_input).pack(side=tk.RIGHT)
 
-        self.input_text = tk.Text(left, wrap=tk.WORD, height=24, undo=True)
+        self.input_text = tk.Text(left, wrap=tk.WORD, undo=True)
         self.input_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
 
         # Output side
         output_header = ttk.Frame(right)
         output_header.pack(fill=tk.X)
-        ttk.Label(output_header, text="Greek Output").pack(side=tk.LEFT)
-        ttk.Button(output_header, text="Copy (Ctrl+Shift+C)", command=self._copy_output).pack(side=tk.RIGHT)
+        ttk.Label(output_header, text="Ελληνική έξοδος").pack(side=tk.LEFT)
+        ttk.Button(output_header, text="Αντιγραφή (Ctrl+Shift+C)", command=self._copy_output).pack(side=tk.RIGHT)
 
-        self.output_text = tk.Text(right, wrap=tk.WORD, height=24, undo=True)
+        self.output_text = tk.Text(right, wrap=tk.WORD, undo=True)
         self.output_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+
+        # ── Footer (status + shortcuts) ────────────────────────────────────────
+        footer = ttk.Frame(self.container)
+        footer.pack(fill=tk.X, pady=(6, 0), side=tk.BOTTOM)
+        
+        self.status_label = ttk.Label(footer, text="Έτοιμο", font=("Segoe UI", 9))
+        self.status_label.pack(side=tk.LEFT)
+        
+        self.word_count_label = ttk.Label(footer, text="", font=("Segoe UI", 9))
+        self.word_count_label.pack(side=tk.LEFT, padx=(12, 0))
+        
+        shortcuts_label = ttk.Label(
+            footer,
+            text="`word`: passthrough  |  Ctrl+I: βελτίωση  |  Ctrl+T: τόνοι  |  Ctrl+L: κατάργηση  |  Ctrl+Shift+C: αντιγραφή  |  Ctrl+D: θέμα",
+            font=("Segoe UI", 9),
+        )
+        shortcuts_label.pack(side=tk.RIGHT, padx=(8, 0))
 
         # ── Action bar ───────────────────────────────────────────────────────
         actions = ttk.Frame(self.container)
-        actions.pack(fill=tk.X, pady=(6, 0))
-        ttk.Button(actions, text="Convert (Ctrl+↵)", command=self.convert_text).pack(side=tk.LEFT)
+        actions.pack(fill=tk.X, pady=(6, 0), side=tk.BOTTOM)
+        ttk.Button(actions, text="Μετατροπή (Ctrl+↵)", command=self.convert_text).pack(side=tk.LEFT)
 
         tone_frame = ttk.Frame(actions)
         tone_frame.pack(side=tk.LEFT, padx=8)
-        ttk.Label(tone_frame, text="Tone:").pack(side=tk.LEFT)
+        ttk.Label(tone_frame, text="Τόνος:").pack(side=tk.LEFT)
         tone_combo = ttk.Combobox(
             tone_frame,
             textvariable=self.tone_var,
             values=[
-                "professional but friendly",
-                "formal",
-                "casual",
-                "academic",
-                "persuasive",
+                "Επαγγελματικός αλλά φιλικός",
+                "Επίσημος",
+                "Περιστασιακός",
+                "Ακαδημαϊκός",
+                "Πειστικός",
+                "Μόνο διόρθωση γραμματικής",
             ],
             state="readonly",
-            width=22,
+            width=32,
             style="Card.TCombobox",
         )
         tone_combo.pack(side=tk.LEFT, padx=(4, 0))
 
-        self.llm_btn = ttk.Button(actions, text="LLM: Improve Tone", command=self.improve_with_llm)
+        self.llm_btn = ttk.Button(actions, text="LLM: Βελτίωση τόνου (Ctrl+I)", command=self.improve_with_llm)
         self.llm_btn.pack(side=tk.LEFT, padx=8)
-        self.tonify_btn = ttk.Button(actions, text="Add Tones (Ctrl+T)", command=self.tonify_text)
+        self.tonify_btn = ttk.Button(actions, text="Προσθήκη τόνων (Ctrl+T)", command=self.tonify_text)
         self.tonify_btn.pack(side=tk.LEFT, padx=4)
-        self.translate_en_el_btn = ttk.Button(actions, text="Translate EN → EL", command=self.translate_en_el)
-        self.translate_en_el_btn.pack(side=tk.LEFT, padx=4)
-        self.translate_el_en_btn = ttk.Button(actions, text="Translate EL → EN", command=self.translate_el_en)
-        self.translate_el_en_btn.pack(side=tk.LEFT, padx=4)
 
-        ttk.Label(
-            actions,
-            text="`word`: English passthrough  |  Ctrl+T: tones  |  Ctrl+L: clear  |  Ctrl+Shift+C: copy  |  Ctrl+D: theme",
-            font=("Segoe UI", 9),
-        ).pack(side=tk.RIGHT)
-
-        # ── Status bar ───────────────────────────────────────────────────────
-        status_bar = ttk.Frame(self.container)
-        status_bar.pack(fill=tk.X, pady=(6, 0))
-        self.status_label = ttk.Label(status_bar, text="Ready", font=("Segoe UI", 9))
-        self.status_label.pack(side=tk.LEFT)
-        self.word_count_label = ttk.Label(status_bar, text="", font=("Segoe UI", 9))
-        self.word_count_label.pack(side=tk.RIGHT)
+        lang_frame = ttk.Frame(actions)
+        lang_frame.pack(side=tk.LEFT, padx=8)
+        ttk.Label(lang_frame, text="Μετάφραση:").pack(side=tk.LEFT)
+        lang_combo = ttk.Combobox(
+            lang_frame,
+            textvariable=self.target_lang_var,
+            values=[
+                "English",
+                "French",
+                "German",
+                "Spanish",
+                "Italian",
+                "Portuguese",
+                "Dutch",
+                "Swedish",
+                "Japanese",
+                "Chinese",
+                "Russian",
+            ],
+            state="readonly",
+            width=13,
+            style="Card.TCombobox",
+        )
+        lang_combo.pack(side=tk.LEFT, padx=(4, 0))
+        self.translate_btn = ttk.Button(actions, text="Μετάφραση", command=self.translate_text)
+        self.translate_btn.pack(side=tk.LEFT, padx=4)
 
         self.input_text.bind("<KeyRelease>", self._on_input_change)
         self._update_text_font()
@@ -398,6 +443,9 @@ class WritingAssistantApp:
         self.theme_name = "light" if self.theme_name == "dark" else "dark"
         self._apply_theme()
 
+    def _on_window_resize(self, event):
+        pass
+
     # ── Font helpers ─────────────────────────────────────────────────────────
     def _update_text_font(self):
         font = ("Segoe UI", self.font_size)
@@ -423,24 +471,24 @@ class WritingAssistantApp:
         if text:
             self.root.clipboard_clear()
             self.root.clipboard_append(text)
-            self._set_status("Output copied to clipboard.")
+            self._set_status("Αντιγράφηκε στο πρόχειρο.")
 
     def _clear_input(self):
         self.input_text.delete("1.0", tk.END)
         self.output_text.delete("1.0", tk.END)
         self._update_word_count("")
-        self._set_status("Cleared.")
+        self._set_status("Καταργήθηκε.")
 
     # ── Status bar ───────────────────────────────────────────────────────────
     def _set_status(self, message: str, after_ms: int = 3000):
         self.status_label.configure(text=message)
         if after_ms:
-            self.root.after(after_ms, lambda: self.status_label.configure(text="Ready"))
+            self.root.after(after_ms, lambda: self.status_label.configure(text="Έτοιμο"))
 
     def _update_word_count(self, text: str):
         words = len(text.split()) if text.strip() else 0
         chars = len(text)
-        self.word_count_label.configure(text=f"{words} words  {chars} chars")
+        self.word_count_label.configure(text=f"{words} λέξεις  {chars} χαρακτήρες")
 
     # ── Input change ─────────────────────────────────────────────────────────
     def _on_input_change(self, _event=None):
@@ -468,7 +516,7 @@ class WritingAssistantApp:
 
     # ── LLM helpers (threaded) ───────────────────────────────────────────────
     def _set_llm_buttons_state(self, state: str):
-        for btn in (self.llm_btn, self.tonify_btn, self.translate_en_el_btn, self.translate_el_en_btn):
+        for btn in (self.llm_btn, self.tonify_btn, self.translate_btn):
             btn.configure(state=state)
 
     def _llm_action(self, action):
@@ -476,14 +524,14 @@ class WritingAssistantApp:
             return
         self._llm_running = True
         self._set_llm_buttons_state("disabled")
-        self._set_status("⏳ LLM working…", after_ms=0)
+        self._set_status("⏳ Το LLM εργάζεται...", after_ms=0)
 
         def _run():
             try:
                 result = action()
                 self.root.after(0, lambda: self._llm_done(result))
             except Exception as exc:  # noqa: BLE001
-                self.root.after(0, lambda: self._llm_error(exc))
+                self.root.after(0, lambda e=exc: self._llm_error(e))
 
         threading.Thread(target=_run, daemon=True).start()
 
@@ -492,17 +540,17 @@ class WritingAssistantApp:
         self.output_text.insert("1.0", result)
         self._llm_running = False
         self._set_llm_buttons_state("normal")
-        self._set_status("Done.")
+        self._set_status("Ολοκλήρωθη.")
 
     def _llm_error(self, exc: Exception):
         self._llm_running = False
         self._set_llm_buttons_state("normal")
-        self._set_status("LLM error — see dialog.")
+        self._set_status("Σφάλμα LLM — δείτε το παράθυρο.")
         messagebox.showerror(
-            "LLM unavailable",
-            f"{exc}\n\nMake sure LM Studio is running and a model is loaded.\n"
+            "LLM μη διαθέσιμο",
+            f"{exc}\n\nΒεβαιωθείτε ότι το LM Studio τρέχει και έχει φορτώσει ένα μοντέλο.\n"
             f"Endpoint: {OPENAI_BASE_URL}\n\n"
-            "Override with env vars: OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL.",
+            "Αντικαταστήστε με μεταβλητές περιβάλλοντος: OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL.",
         )
 
     def tonify_text(self):
@@ -513,16 +561,14 @@ class WritingAssistantApp:
 
     def improve_with_llm(self):
         text = self.output_text.get("1.0", tk.END).rstrip("\n") or self.input_text.get("1.0", tk.END).rstrip("\n")
-        tone = self.tone_var.get()
+        greek_tone = self.tone_var.get()
+        tone = TONE_MAPPING.get(greek_tone, "professional but friendly")
         self._llm_action(lambda: self.llm.improve_greek(text=text, tone=tone))
 
-    def translate_en_el(self):
-        text = self.input_text.get("1.0", tk.END).rstrip("\n")
-        self._llm_action(lambda: self.llm.translate(text=text, source_lang="English", target_lang="Greek"))
-
-    def translate_el_en(self):
+    def translate_text(self):
         text = self.output_text.get("1.0", tk.END).rstrip("\n") or self.input_text.get("1.0", tk.END).rstrip("\n")
-        self._llm_action(lambda: self.llm.translate(text=text, source_lang="Greek", target_lang="English"))
+        target_lang = self.target_lang_var.get()
+        self._llm_action(lambda: self.llm.translate(text=text, source_lang="Greek", target_lang=target_lang))
 
 
 def main():
