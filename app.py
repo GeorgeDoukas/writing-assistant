@@ -1,7 +1,10 @@
+import json
 import os
 import re
 import threading
 import tkinter as tk
+import urllib.error
+import urllib.request
 from tkinter import messagebox, ttk
 
 
@@ -91,43 +94,51 @@ def second_pass_corrections(text: str) -> str:
     return corrected
 
 
-# LM Studio default endpoint — override with env vars if needed
+# LM Studio / OpenAI-compatible endpoint — override with env vars if needed
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "local-model")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "google/gemma-3n-e4b")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "lm-studio")  # LM Studio ignores the key
 
 
 class LLMAssistant:
-    def __init__(self) -> None:
-        self._llm = None
-
-    def _get_llm(self):
-        if self._llm:
-            return self._llm
-        try:
-            from langchain_openai import ChatOpenAI
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError("Install langchain-openai: pip install langchain-openai") from exc
-        self._llm = ChatOpenAI(
-            base_url=OPENAI_BASE_URL,
-            api_key="lm-studio",  # LM Studio ignores the key but the field is required
-            model=OPENAI_MODEL,
-            temperature=0.2,
-        )
-        return self._llm
-
     def _invoke(self, system_prompt: str, user_text: str) -> str:
-        llm = self._get_llm()
-        response = llm.invoke(
-            [
-                ("system", system_prompt),
-                ("human", user_text),
-            ]
+        payload = json.dumps({
+            "model": OPENAI_MODEL,
+            "temperature": 0.2,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_text},
+            ],
+        }).encode()
+        req = urllib.request.Request(
+            f"{OPENAI_BASE_URL.rstrip('/')}/chat/completions",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+            },
         )
-        return response.content.strip()
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Cannot reach LLM endpoint ({OPENAI_BASE_URL}).\n"
+                "Make sure LM Studio is running and a model is loaded, or set "
+                "OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL."
+            ) from exc
+        return data["choices"][0]["message"]["content"].strip()
 
     def improve_greek(self, text: str, tone: str) -> str:
         return self._invoke(
             f"Improve grammar and clarity in Greek. Keep meaning and output only Greek text with {tone} tone.",
+            text,
+        )
+
+    def tonify(self, text: str) -> str:
+        return self._invoke(
+            "You are a Greek orthography assistant. Add the correct accent mark (τόνος) to every Greek word that needs one. "
+            "Return ONLY the corrected Greek text — no explanations, no extra lines, no markdown.",
             text,
         )
 
@@ -166,6 +177,8 @@ class WritingAssistantApp:
         self.theme_name = "dark"
         self.llm = LLMAssistant()
         self.auto_convert_var = tk.BooleanVar(value=True)
+        self.auto_tonify_var = tk.BooleanVar(value=False)
+        self._tonify_timer = None
         self.font_size = 11
         self._llm_running = False
 
@@ -179,6 +192,8 @@ class WritingAssistantApp:
         self.root.bind("<Control-Return>", lambda _e: self.convert_text())
         self.root.bind("<Control-Shift-c>", lambda _e: self._copy_output())
         self.root.bind("<Control-Shift-C>", lambda _e: self._copy_output())
+        self.root.bind("<Control-t>", lambda _e: self.tonify_text())
+        self.root.bind("<Control-T>", lambda _e: self.tonify_text())
 
     def _build_ui(self):
         self.container = ttk.Frame(self.root, padding=14)
@@ -192,6 +207,7 @@ class WritingAssistantApp:
         title.pack(side=tk.LEFT)
 
         ttk.Checkbutton(top, text="Auto convert", variable=self.auto_convert_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=10)
+        ttk.Checkbutton(top, text="Auto-tonify (5s)", variable=self.auto_tonify_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=(0, 10))
 
         # Font size
         font_frame = ttk.Frame(top)
@@ -257,6 +273,8 @@ class WritingAssistantApp:
 
         self.llm_btn = ttk.Button(actions, text="LLM: Improve Tone", command=self.improve_with_llm)
         self.llm_btn.pack(side=tk.LEFT, padx=8)
+        self.tonify_btn = ttk.Button(actions, text="Add Tones (Ctrl+T)", command=self.tonify_text)
+        self.tonify_btn.pack(side=tk.LEFT, padx=4)
         self.translate_en_el_btn = ttk.Button(actions, text="Translate EN → EL", command=self.translate_en_el)
         self.translate_en_el_btn.pack(side=tk.LEFT, padx=4)
         self.translate_el_en_btn = ttk.Button(actions, text="Translate EL → EN", command=self.translate_el_en)
@@ -264,7 +282,7 @@ class WritingAssistantApp:
 
         ttk.Label(
             actions,
-            text="Ctrl+L: clear  |  Ctrl+Shift+C: copy  |  Ctrl+D: theme",
+            text="Ctrl+T: tones  |  Ctrl+L: clear  |  Ctrl+Shift+C: copy  |  Ctrl+D: theme",
             font=("Segoe UI", 9),
         ).pack(side=tk.RIGHT)
 
@@ -403,6 +421,17 @@ class WritingAssistantApp:
         self._update_word_count(text)
         if self.auto_convert_var.get():
             self.convert_text()
+        # 5-second debounce for auto-tonify
+        if self._tonify_timer is not None:
+            self.root.after_cancel(self._tonify_timer)
+            self._tonify_timer = None
+        if self.auto_tonify_var.get():
+            self._tonify_timer = self.root.after(5000, self._auto_tonify_fire)
+
+    def _auto_tonify_fire(self):
+        self._tonify_timer = None
+        if self.auto_tonify_var.get() and not self._llm_running:
+            self.tonify_text()
 
     def convert_text(self):
         source = self.input_text.get("1.0", tk.END).rstrip("\n")
@@ -412,7 +441,7 @@ class WritingAssistantApp:
 
     # ── LLM helpers (threaded) ───────────────────────────────────────────────
     def _set_llm_buttons_state(self, state: str):
-        for btn in (self.llm_btn, self.translate_en_el_btn, self.translate_el_en_btn):
+        for btn in (self.llm_btn, self.tonify_btn, self.translate_en_el_btn, self.translate_el_en_btn):
             btn.configure(state=state)
 
     def _llm_action(self, action):
@@ -446,9 +475,14 @@ class WritingAssistantApp:
             "LLM unavailable",
             f"{exc}\n\nMake sure LM Studio is running and a model is loaded.\n"
             f"Endpoint: {OPENAI_BASE_URL}\n\n"
-            "Install dependency: pip install langchain-openai\n"
-            "Override endpoint: set LM_STUDIO_BASE_URL env var.",
+            "Override with env vars: OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL.",
         )
+
+    def tonify_text(self):
+        text = self.output_text.get("1.0", tk.END).rstrip("\n") or self.input_text.get("1.0", tk.END).rstrip("\n")
+        if not text.strip():
+            return
+        self._llm_action(lambda: self.llm.tonify(text=text))
 
     def improve_with_llm(self):
         text = self.output_text.get("1.0", tk.END).rstrip("\n") or self.input_text.get("1.0", tk.END).rstrip("\n")

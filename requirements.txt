@@ -1,4 +1,0 @@
-# Core — no external dependencies required for offline Greeklish conversion
-
-# Required for LLM features (OpenAI-compatible API)
-langchain-openai>=0.3
