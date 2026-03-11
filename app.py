@@ -61,12 +61,30 @@ def _preserve_case(source: str, target: str) -> str:
 
 
 def greeklish_to_greek(text: str) -> str:
+    # Backtick escape: `word` passes through as-is (backticks are stripped)
+    # e.g. "pws paei to `deployment` sto `cloud`" → "πώς πάει το deployment στο cloud"
+    PLACEHOLDER_PREFIX = "\x00PASSTHROUGH"
+    passthroughs: list[str] = []
+
+    def _stash(m: re.Match) -> str:
+        passthroughs.append(m.group(1))
+        return f"{PLACEHOLDER_PREFIX}{len(passthroughs) - 1}\x00"
+
+    escaped = re.sub(r"`([^`]*)`", _stash, text)
+
     out = []
     i = 0
-    while i < len(text):
+    while i < len(escaped):
+        # Restore placeholder
+        if escaped[i] == "\x00" and escaped[i:].startswith(PLACEHOLDER_PREFIX):
+            end = escaped.index("\x00", i + 1)
+            idx = int(escaped[i + len(PLACEHOLDER_PREFIX):end])
+            out.append(passthroughs[idx])
+            i = end + 1
+            continue
         matched = False
         for size in (2,):
-            chunk = text[i : i + size]
+            chunk = escaped[i : i + size]
             lower = chunk.lower()
             if lower in GREEKLISH_MULTI:
                 out.append(_preserve_case(chunk, GREEKLISH_MULTI[lower]))
@@ -75,7 +93,7 @@ def greeklish_to_greek(text: str) -> str:
                 break
         if matched:
             continue
-        ch = text[i]
+        ch = escaped[i]
         lower = ch.lower()
         if lower in GREEKLISH_SINGLE:
             out.append(_preserve_case(ch, GREEKLISH_SINGLE[lower]))
@@ -96,8 +114,8 @@ def second_pass_corrections(text: str) -> str:
 
 # LM Studio / OpenAI-compatible endpoint — override with env vars if needed
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "google/gemma-3n-e4b")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "lm-studio")  # LM Studio ignores the key
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "llm_model")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "random-api-key")  # LM Studio ignores the key
 
 
 class LLMAssistant:
@@ -282,7 +300,7 @@ class WritingAssistantApp:
 
         ttk.Label(
             actions,
-            text="Ctrl+T: tones  |  Ctrl+L: clear  |  Ctrl+Shift+C: copy  |  Ctrl+D: theme",
+            text="`word`: English passthrough  |  Ctrl+T: tones  |  Ctrl+L: clear  |  Ctrl+Shift+C: copy  |  Ctrl+D: theme",
             font=("Segoe UI", 9),
         ).pack(side=tk.RIGHT)
 
