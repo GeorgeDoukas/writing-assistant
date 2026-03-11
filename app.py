@@ -7,6 +7,10 @@ import urllib.error
 import urllib.request
 from tkinter import messagebox, ttk
 
+from config import ConfigManager
+from dialogs import SettingsDialog, ToneExamplesDialog
+from greeklish_editor import GreeklishProfileEditor
+
 
 GREEKLISH_MULTI = {
     "ps": "ψ",
@@ -54,7 +58,7 @@ GREEKLISH_SINGLE = {
 TONE_MAPPING = {
     "Επαγγελματικός αλλά φιλικός": "professional but friendly",
     "Επίσημος": "formal",
-    "Περιστασιακός": "casual",
+    "Χαλαρός": "casual",
     "Ακαδημαϊκός": "academic",
     "Πειστικός": "persuasive",
     "Μόνο διόρθωση γραμματικής": "correct grammar only, no tone changes",
@@ -121,16 +125,17 @@ def second_pass_corrections(text: str) -> str:
     return corrected
 
 
-# LM Studio / OpenAI-compatible endpoint — override with env vars if needed
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "llm_model")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "random-api-key")  # LM Studio ignores the key
 
 
 class LLMAssistant:
+    def __init__(self):
+        self.OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
+        self.OPENAI_MODEL = os.getenv("OPENAI_MODEL", "llm_model")
+        self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "random-api-key")
+
     def _invoke(self, system_prompt: str, user_text: str) -> str:
         payload = json.dumps({
-            "model": OPENAI_MODEL,
+            "model": self.OPENAI_MODEL,
             "temperature": 0.2,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -138,11 +143,11 @@ class LLMAssistant:
             ],
         }).encode()
         req = urllib.request.Request(
-            f"{OPENAI_BASE_URL.rstrip('/')}/chat/completions",
+            f"{self.OPENAI_BASE_URL.rstrip('/')}/chat/completions",
             data=payload,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Authorization": f"Bearer {self.OPENAI_API_KEY}",
             },
         )
         try:
@@ -150,7 +155,7 @@ class LLMAssistant:
                 data = json.loads(resp.read())
         except urllib.error.URLError as exc:
             raise RuntimeError(
-                f"Cannot reach LLM endpoint ({OPENAI_BASE_URL}).\n"
+                f"Cannot reach LLM endpoint ({self.OPENAI_BASE_URL}).\n"
                 "Make sure LM Studio is running and a model is loaded, or set "
                 "OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL."
             ) from exc
@@ -162,6 +167,16 @@ class LLMAssistant:
             f"Fix grammar, syntax, and clarity while strictly preserving the original meaning. "
             f"Apply a '{tone}' tone throughout. "
             f"Return ONLY the corrected Greek text — no explanations, no markdown, no introductory phrases.",
+            text,
+        )
+
+    def improve_tone_grammar_orthography(self, text: str, tone: str) -> str:
+        return self._invoke(
+            f"You are a professional Greek text editor and orthography specialist. "
+            f"1. Fix grammar, syntax, and clarity while strictly preserving the original meaning. "
+            f"2. Apply a '{tone}' tone throughout. "
+            f"3. Add correct accent marks (tonifies) to every word that requires one, following the modern monotonic system. "
+            f"Return ONLY the improved Greek text — no explanations, no markdown, no introductory phrases.",
             text,
         )
 
@@ -209,22 +224,48 @@ class WritingAssistantApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Ελληνικός Βοηθός Γραφής")
-        self.root.geometry("1111x690")
-        self.root.minsize(1111, 690)
-        self.theme_name = "dark"
+        
+        # Load configuration
+        self.config = ConfigManager()
+        
+        # Apply saved window size
+        width = self.config.get("window_width", 1380)
+        height = self.config.get("window_height", 690)
+        self.root.geometry(f"{width}x{height}")
+        self.root.minsize(1380, 690)
+        
+        # Initialize LLM with config values
         self.llm = LLMAssistant()
-        self.auto_convert_var = tk.BooleanVar(value=True)
-        self.auto_tonify_var = tk.BooleanVar(value=False)
+        self.llm.OPENAI_BASE_URL = self.config.get("llm_endpoint", "http://localhost:1234/v1")
+        self.llm.OPENAI_MODEL = self.config.get("llm_model", "llm_model")
+        self.llm.OPENAI_API_KEY = self.config.get("llm_api_key", "random-api-key")
+        
+        # Initialize variables from config
+        self.theme_name = self.config.get("theme", "dark")
+        self.auto_convert_var = tk.BooleanVar(value=self.config.get("auto_convert", True))
+        self.auto_tonify_var = tk.BooleanVar(value=self.config.get("auto_tonify", False))
         self._tonify_timer = None
-        self.font_size = 11
+        self.font_size = self.config.get("font_size", 11)
         self._llm_running = False
 
-        self.tone_var = tk.StringVar(value="Μόνο διόρθωση γραμματικής")
-        self.target_lang_var = tk.StringVar(value="English")
+        self.tone_var = tk.StringVar(value=self.config.get("default_tone", "Μόνο διόρθωση γραμματικής"))
+        self.target_lang_var = tk.StringVar(value=self.config.get("last_language", "English"))
+        
+        # Load custom greeklish profile
+        self.greeklish_profile = self.config.load_greeklish_profile(
+            self.config.get("active_greeklish_profile", "default")
+        )
+        if self.greeklish_profile:
+            global GREEKLISH_MULTI, GREEKLISH_SINGLE
+            GREEKLISH_MULTI = self.greeklish_profile.get("multi", GREEKLISH_MULTI)
+            GREEKLISH_SINGLE = self.greeklish_profile.get("single", GREEKLISH_SINGLE)
+        
         self.style = ttk.Style()
-        self.style.theme_use("clam")  # allows full bg/fg overrides on Windows
+        self.style.theme_use("clam")
         self._build_ui()
         self._apply_theme()
+        
+        # Keyboard shortcuts
         self.root.bind("<Control-l>", lambda _e: self._clear_input())
         self.root.bind("<Control-d>", lambda _e: self.toggle_theme())
         self.root.bind("<Control-Return>", lambda _e: self.convert_text())
@@ -235,6 +276,12 @@ class WritingAssistantApp:
         self.root.bind("<Control-i>", lambda _e: self.improve_with_llm())
         self.root.bind("<Control-I>", lambda _e: self.improve_with_llm())
         self.root.bind("<Configure>", self._on_window_resize)
+        
+        # Save window size on close
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
+        
+        # Test LLM connection on startup
+        self.root.after(500, self._check_connection)
 
     def _build_ui(self):
         self.container = ttk.Frame(self.root, padding=14)
@@ -260,6 +307,9 @@ class WritingAssistantApp:
         ttk.Button(font_frame, text="+", width=2, command=self._font_increase).pack(side=tk.LEFT)
 
         ttk.Button(top, text="Εναλλαγή θέματος (Ctrl+D)", command=self.toggle_theme).pack(side=tk.RIGHT, padx=(0, 8))
+        ttk.Button(top, text="Ρυθμίσεις", command=self._open_settings).pack(side=tk.RIGHT, padx=(0, 8))
+        ttk.Button(top, text="Παραδείγματα τόνων", command=self._open_tone_examples).pack(side=tk.RIGHT, padx=(0, 8))
+        ttk.Button(top, text="Προφίλ Greeklish", command=self._open_greeklish_editor).pack(side=tk.RIGHT, padx=(0, 8))
 
         # ── Middle frame (expands to fill space) ──────────────────────────────
         middle = ttk.Frame(self.container)
@@ -282,6 +332,7 @@ class WritingAssistantApp:
 
         self.input_text = tk.Text(left, wrap=tk.WORD, undo=True)
         self.input_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+        self.input_text.bind("<Button-3>", lambda e: self._show_context_menu(e, self.input_text))
 
         # Output side
         output_header = ttk.Frame(right)
@@ -291,6 +342,7 @@ class WritingAssistantApp:
 
         self.output_text = tk.Text(right, wrap=tk.WORD, undo=True)
         self.output_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+        self.output_text.bind("<Button-3>", lambda e: self._show_context_menu(e, self.output_text))
 
         # ── Footer (status + shortcuts) ────────────────────────────────────────
         footer = ttk.Frame(self.container)
@@ -301,6 +353,9 @@ class WritingAssistantApp:
         
         self.word_count_label = ttk.Label(footer, text="", font=("Segoe UI", 9))
         self.word_count_label.pack(side=tk.LEFT, padx=(12, 0))
+        
+        self.connection_status_label = ttk.Label(footer, text="[Checking...]", font=("Segoe UI", 9))
+        self.connection_status_label.pack(side=tk.LEFT, padx=(12, 0))
         
         shortcuts_label = ttk.Label(
             footer,
@@ -321,12 +376,12 @@ class WritingAssistantApp:
             tone_frame,
             textvariable=self.tone_var,
             values=[
+                "Μόνο διόρθωση γραμματικής",
                 "Επαγγελματικός αλλά φιλικός",
                 "Επίσημος",
-                "Περιστασιακός",
+                "Χαλαρός",
                 "Ακαδημαϊκός",
                 "Πειστικός",
-                "Μόνο διόρθωση γραμματικής",
             ],
             state="readonly",
             width=32,
@@ -336,6 +391,8 @@ class WritingAssistantApp:
 
         self.llm_btn = ttk.Button(actions, text="LLM: Βελτίωση τόνου (Ctrl+I)", command=self.improve_with_llm)
         self.llm_btn.pack(side=tk.LEFT, padx=8)
+        self.tone_grammar_btn = ttk.Button(actions, text="Τόνος + Γραμματική", command=self.improve_tone_grammar)
+        self.tone_grammar_btn.pack(side=tk.LEFT, padx=4)
         self.tonify_btn = ttk.Button(actions, text="Προσθήκη τόνων (Ctrl+T)", command=self.tonify_text)
         self.tonify_btn.pack(side=tk.LEFT, padx=4)
 
@@ -516,7 +573,7 @@ class WritingAssistantApp:
 
     # ── LLM helpers (threaded) ───────────────────────────────────────────────
     def _set_llm_buttons_state(self, state: str):
-        for btn in (self.llm_btn, self.tonify_btn, self.translate_btn):
+        for btn in (self.llm_btn, self.tone_grammar_btn, self.tonify_btn, self.translate_btn):
             btn.configure(state=state)
 
     def _llm_action(self, action):
@@ -548,8 +605,8 @@ class WritingAssistantApp:
         self._set_status("Σφάλμα LLM — δείτε το παράθυρο.")
         messagebox.showerror(
             "LLM μη διαθέσιμο",
-            f"{exc}\n\nΒεβαιωθείτε ότι το LM Studio τρέχει και έχει φορτώσει ένα μοντέλο.\n"
-            f"Endpoint: {OPENAI_BASE_URL}\n\n"
+            f"{exc}\n\nΒεβαιωθείτε ότι το OpenAI endpoint είναι σωστό.\n"
+            f"Endpoint: {self.llm.OPENAI_BASE_URL}\n\n"
             "Αντικαταστήστε με μεταβλητές περιβάλλοντος: OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL.",
         )
 
@@ -565,10 +622,81 @@ class WritingAssistantApp:
         tone = TONE_MAPPING.get(greek_tone, "professional but friendly")
         self._llm_action(lambda: self.llm.improve_greek(text=text, tone=tone))
 
+    def improve_tone_grammar(self):
+        """Improve text with tone, grammar, and orthography."""
+        text = self.output_text.get("1.0", tk.END).rstrip("\n") or self.input_text.get("1.0", tk.END).rstrip("\n")
+        greek_tone = self.tone_var.get()
+        tone = TONE_MAPPING.get(greek_tone, "professional but friendly")
+        self._llm_action(lambda: self.llm.improve_tone_grammar_orthography(text=text, tone=tone))
+
     def translate_text(self):
         text = self.output_text.get("1.0", tk.END).rstrip("\n") or self.input_text.get("1.0", tk.END).rstrip("\n")
         target_lang = self.target_lang_var.get()
         self._llm_action(lambda: self.llm.translate(text=text, source_lang="Greek", target_lang=target_lang))
+
+    def _open_settings(self):
+        """Open the Settings dialog."""
+        SettingsDialog(self.root, self.config, self.llm, self)
+
+    def _open_tone_examples(self):
+        """Open the Tone Examples dialog."""
+        ToneExamplesDialog(self.root, self.llm)
+
+    def _open_greeklish_editor(self):
+        """Open the Greeklish Profile Editor dialog."""
+        GreeklishProfileEditor(self.root, self.config, self)
+
+    def _check_connection(self):
+        """Check if LLM is available and update connection status indicator."""
+        def check():
+            try:
+                self.llm._invoke("You are a helpful assistant.", "Hi")
+                status = "[Online]"
+                self.root.after(0, lambda: self.connection_status_label.configure(text=status, foreground="#4CAF50"))
+            except Exception:
+                status = "[Offline]"
+                self.root.after(0, lambda: self.connection_status_label.configure(text=status, foreground="#F44336"))
+        
+        thread = threading.Thread(target=check, daemon=True)
+        thread.start()
+
+    def _on_closing(self):
+        """Save window geometry and close the app."""
+        self.config.set("window_width", self.root.winfo_width())
+        self.config.set("window_height", self.root.winfo_height())
+        self.config.save()
+        self.root.destroy()
+
+    def _show_context_menu(self, event, text_widget):
+        """Show right-click context menu."""
+        menu = tk.Menu(self.root, tearoff=False)
+        menu.add_command(label="Αντιγραφή", command=lambda: self._copy_text(text_widget))
+        menu.add_command(label="Επικόλληση", command=lambda: self._paste_text(text_widget))
+        menu.add_separator()
+        menu.add_command(label="Διαγραφή", command=lambda: self._clear_text(text_widget))
+        menu.post(event.x_root, event.y_root)
+
+    def _copy_text(self, text_widget):
+        """Copy selected text or all text."""
+        try:
+            text = text_widget.get(tk.SEL_FIRST, tk.SEL_LAST)
+        except tk.TclError:
+            text = text_widget.get("1.0", tk.END)
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+
+    def _paste_text(self, text_widget):
+        """Paste text from clipboard."""
+        try:
+            text = self.root.clipboard_get()
+            text_widget.delete("1.0", tk.END)
+            text_widget.insert("1.0", text)
+        except tk.TclError:
+            pass
+
+    def _clear_text(self, text_widget):
+        """Clear all text from widget."""
+        text_widget.delete("1.0", tk.END)
 
 
 def main():

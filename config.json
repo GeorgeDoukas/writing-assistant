@@ -1,0 +1,59 @@
+{
+  "theme": "dark",
+  "font_size": 11,
+  "default_tone": "Μόνο διόρθωση γραμματικής",
+  "auto_convert": true,
+  "auto_tonify": false,
+  "llm_endpoint": "http://localhost:1234/v1",
+  "llm_model": "llm_model",
+  "llm_api_key": "random-api-key",
+  "window_width": 1380,
+  "window_height": 690,
+  "last_language": "English",
+  "active_greeklish_profile": "default",
+  "greeklish_profiles": {
+    "default": {
+      "multi": {
+        "ps": "ψ",
+        "ou": "ου",
+        "ai": "αι",
+        "ei": "ει",
+        "oi": "οι",
+        "au": "αυ",
+        "eu": "ευ",
+        "mp": "μπ",
+        "nt": "ντ",
+        "gk": "γκ",
+        "gg": "γγ"
+      },
+      "single": {
+        "a": "α",
+        "b": "β",
+        "v": "β",
+        "g": "γ",
+        "d": "δ",
+        "e": "ε",
+        "z": "ζ",
+        "h": "η",
+        "8": "θ",
+        "i": "ι",
+        "k": "κ",
+        "l": "λ",
+        "m": "μ",
+        "n": "ν",
+        "3": "ξ",
+        "o": "ο",
+        "p": "π",
+        "r": "ρ",
+        "s": "σ",
+        "t": "τ",
+        "u": "υ",
+        "y": "υ",
+        "f": "φ",
+        "x": "χ",
+        "w": "ω",
+        "?": ";"
+      }
+    }
+  }
+}
