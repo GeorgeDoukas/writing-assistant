@@ -10,7 +10,7 @@ class SettingsDialog(tk.Toplevel):
     def __init__(self, parent, config, llm_assistant, app_callback=None):
         super().__init__(parent)
         self.title("Ρυθμίσεις")
-        self.geometry("550x680")
+        self.geometry("350x500")
         self.config_manager = config
         self.llm_assistant = llm_assistant
         self.app_callback = app_callback
@@ -49,20 +49,20 @@ class SettingsDialog(tk.Toplevel):
 
         # Default Tone
         ttk.Label(frame, text="Προεπιλεγμένος τόνος:").pack(anchor=tk.W, pady=(0, 5))
-        self.tone_var = tk.StringVar(value=self.config_manager.get("default_tone", "Μόνο διόρθωση γραμματικής"))
+        self.tone_var = tk.StringVar(value=self.config_manager.get("default_tone", "Μόνο διόρθωση γραμματικής και ορθογραφίας"))
         tone_combo = ttk.Combobox(
             frame,
             textvariable=self.tone_var,
             values=[
+                "Μόνο διόρθωση γραμματικής και ορθογραφίας",
                 "Επαγγελματικός αλλά φιλικός",
                 "Επίσημος",
-                "Περιστασιακός",
+                "Χαλαρός",
                 "Ακαδημαϊκός",
                 "Πειστικός",
-                "Μόνο διόρθωση γραμματικής",
             ],
             state="readonly",
-            width=30,
+            width=45,
         )
         tone_combo.pack(anchor=tk.W, pady=(0, 15))
 
@@ -80,12 +80,12 @@ class SettingsDialog(tk.Toplevel):
 
         # Checkboxes
         self.auto_convert_var = tk.BooleanVar(value=self.config_manager.get("auto_convert", True))
-        ttk.Checkbutton(frame, text="Αυτόματη μετατροπή Greeklish", variable=self.auto_convert_var).pack(
+        ttk.Checkbutton(frame, text="Αυτόματη μετατροπή", variable=self.auto_convert_var).pack(
             anchor=tk.W, pady=(0, 5)
         )
 
         self.auto_tonify_var = tk.BooleanVar(value=self.config_manager.get("auto_tonify", False))
-        ttk.Checkbutton(frame, text="Αυτόματη προσθήκη τόνων (5 δευτερόλεπτα)", variable=self.auto_tonify_var).pack(
+        ttk.Checkbutton(frame, text="Αυτόματη Βελτίωση (5 δευτερόλεπτα)", variable=self.auto_tonify_var).pack(
             anchor=tk.W, pady=(0, 20)
         )
 
@@ -119,6 +119,7 @@ class SettingsDialog(tk.Toplevel):
             self.config_manager.set("default_tone", self.tone_var.get())
             self.config_manager.set("llm_endpoint", self.endpoint_var.get())
             self.config_manager.set("llm_model", self.model_var.get())
+            self.config_manager.set("llm_api_key", self.config_manager.get("llm_api_key", "random-api-key"))
             self.config_manager.set("auto_convert", self.auto_convert_var.get())
             self.config_manager.set("auto_tonify", self.auto_tonify_var.get())
             self.config_manager.save()
@@ -126,7 +127,7 @@ class SettingsDialog(tk.Toplevel):
             # Update LLM settings
             self.llm_assistant.OPENAI_BASE_URL = self.endpoint_var.get()
             self.llm_assistant.OPENAI_MODEL = self.model_var.get()
-            
+            self.llm_assistant.OPENAI_API_KEY = self.config_manager.get("llm_api_key", "random-api-key")
             # Apply theme change immediately if app callback is provided
             if self.app_callback:
                 if self.app_callback.theme_name != self.theme_var.get():
@@ -146,12 +147,12 @@ class ToneExamplesDialog(tk.Toplevel):
     """Show examples of each tone."""
 
     TONES = {
+        "Μόνο διόρθωση γραμματικής και ορθογραφίας": "correct grammar and spelling only, no tone changes",
         "Επαγγελματικός αλλά φιλικός": "professional but friendly",
         "Επίσημος": "formal",
-        "Περιστασιακός": "casual",
+        "Χαλαρός": "casual",
         "Ακαδημαϊκός": "academic",
         "Πειστικός": "persuasive",
-        "Μόνο διόρθωση γραμματικής": "correct grammar only",
     }
 
     def __init__(self, parent, llm_assistant):

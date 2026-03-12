@@ -56,12 +56,12 @@ GREEKLISH_SINGLE = {
 }
 
 TONE_MAPPING = {
+    "Μόνο διόρθωση γραμματικής και ορθογραφίας": "correct grammar and spelling only, no tone changes",
     "Επαγγελματικός αλλά φιλικός": "professional but friendly",
     "Επίσημος": "formal",
     "Χαλαρός": "casual",
     "Ακαδημαϊκός": "academic",
     "Πειστικός": "persuasive",
-    "Μόνο διόρθωση γραμματικής": "correct grammar only, no tone changes",
 }
 
 
@@ -248,7 +248,7 @@ class WritingAssistantApp:
         self.font_size = self.config.get("font_size", 11)
         self._llm_running = False
 
-        self.tone_var = tk.StringVar(value=self.config.get("default_tone", "Μόνο διόρθωση γραμματικής"))
+        self.tone_var = tk.StringVar(value=self.config.get("default_tone", "Μόνο διόρθωση γραμματικής και ορθογραφίας"))
         self.target_lang_var = tk.StringVar(value=self.config.get("last_language", "English"))
         
         # Load custom greeklish profile
@@ -271,8 +271,6 @@ class WritingAssistantApp:
         self.root.bind("<Control-Return>", lambda _e: self.convert_text())
         self.root.bind("<Control-Shift-c>", lambda _e: self._copy_output())
         self.root.bind("<Control-Shift-C>", lambda _e: self._copy_output())
-        self.root.bind("<Control-t>", lambda _e: self.tonify_text())
-        self.root.bind("<Control-T>", lambda _e: self.tonify_text())
         self.root.bind("<Control-i>", lambda _e: self.improve_with_llm())
         self.root.bind("<Control-I>", lambda _e: self.improve_with_llm())
         self.root.bind("<Configure>", self._on_window_resize)
@@ -295,7 +293,7 @@ class WritingAssistantApp:
         title.pack(side=tk.LEFT)
 
         ttk.Checkbutton(top, text="Αυτόματη μετατροπή", variable=self.auto_convert_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=10)
-        ttk.Checkbutton(top, text="Αυτόματη τονικότητα (5δ)", variable=self.auto_tonify_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Checkbutton(top, text="Αυτόματη Βελτίωση", variable=self.auto_tonify_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=(0, 10))
 
         # Font size
         font_frame = ttk.Frame(top)
@@ -359,7 +357,7 @@ class WritingAssistantApp:
         
         shortcuts_label = ttk.Label(
             footer,
-            text="`word`: passthrough  |  Ctrl+I: βελτίωση  |  Ctrl+T: τόνοι  |  Ctrl+L: κατάργηση  |  Ctrl+Shift+C: αντιγραφή  |  Ctrl+D: θέμα",
+            text="`word`: passthrough  |  Ctrl+I: βελτίωση  |  Ctrl+L: κατάργηση  |  Ctrl+Shift+C: αντιγραφή  |  Ctrl+D: θέμα",
             font=("Segoe UI", 9),
         )
         shortcuts_label.pack(side=tk.RIGHT, padx=(8, 0))
@@ -376,7 +374,7 @@ class WritingAssistantApp:
             tone_frame,
             textvariable=self.tone_var,
             values=[
-                "Μόνο διόρθωση γραμματικής",
+                "Μόνο διόρθωση γραμματικής και ορθογραφίας",
                 "Επαγγελματικός αλλά φιλικός",
                 "Επίσημος",
                 "Χαλαρός",
@@ -384,17 +382,13 @@ class WritingAssistantApp:
                 "Πειστικός",
             ],
             state="readonly",
-            width=32,
+            width=45,
             style="Card.TCombobox",
         )
         tone_combo.pack(side=tk.LEFT, padx=(4, 0))
 
-        self.llm_btn = ttk.Button(actions, text="LLM: Βελτίωση τόνου (Ctrl+I)", command=self.improve_with_llm)
+        self.llm_btn = ttk.Button(actions, text="LLM: Βελτίωση (Ctrl+I)", command=self.improve_with_llm)
         self.llm_btn.pack(side=tk.LEFT, padx=8)
-        self.tone_grammar_btn = ttk.Button(actions, text="Τόνος + Γραμματική", command=self.improve_tone_grammar)
-        self.tone_grammar_btn.pack(side=tk.LEFT, padx=4)
-        self.tonify_btn = ttk.Button(actions, text="Προσθήκη τόνων (Ctrl+T)", command=self.tonify_text)
-        self.tonify_btn.pack(side=tk.LEFT, padx=4)
 
         lang_frame = ttk.Frame(actions)
         lang_frame.pack(side=tk.LEFT, padx=8)
@@ -563,7 +557,7 @@ class WritingAssistantApp:
     def _auto_tonify_fire(self):
         self._tonify_timer = None
         if self.auto_tonify_var.get() and not self._llm_running:
-            self.tonify_text()
+            self.improve_with_llm()
 
     def convert_text(self):
         source = self.input_text.get("1.0", tk.END).rstrip("\n")
@@ -573,7 +567,7 @@ class WritingAssistantApp:
 
     # ── LLM helpers (threaded) ───────────────────────────────────────────────
     def _set_llm_buttons_state(self, state: str):
-        for btn in (self.llm_btn, self.tone_grammar_btn, self.tonify_btn, self.translate_btn):
+        for btn in (self.llm_btn, self.translate_btn):
             btn.configure(state=state)
 
     def _llm_action(self, action):
@@ -617,17 +611,18 @@ class WritingAssistantApp:
         self._llm_action(lambda: self.llm.tonify(text=text))
 
     def improve_with_llm(self):
+        """Improve text with tone, grammar, and orthography. Grammar-only mode skips tone changes."""
         text = self.output_text.get("1.0", tk.END).rstrip("\n") or self.input_text.get("1.0", tk.END).rstrip("\n")
+        if not text.strip():
+            return
         greek_tone = self.tone_var.get()
         tone = TONE_MAPPING.get(greek_tone, "professional but friendly")
-        self._llm_action(lambda: self.llm.improve_greek(text=text, tone=tone))
+        # Always use improve_tone_grammar_orthography - it handles both tone and grammar-only modes
+        self._llm_action(lambda: self.llm.improve_tone_grammar_orthography(text=text, tone=tone))
 
     def improve_tone_grammar(self):
-        """Improve text with tone, grammar, and orthography."""
-        text = self.output_text.get("1.0", tk.END).rstrip("\n") or self.input_text.get("1.0", tk.END).rstrip("\n")
-        greek_tone = self.tone_var.get()
-        tone = TONE_MAPPING.get(greek_tone, "professional but friendly")
-        self._llm_action(lambda: self.llm.improve_tone_grammar_orthography(text=text, tone=tone))
+        """Deprecated: use improve_with_llm() instead."""
+        self.improve_with_llm()
 
     def translate_text(self):
         text = self.output_text.get("1.0", tk.END).rstrip("\n") or self.input_text.get("1.0", tk.END).rstrip("\n")
