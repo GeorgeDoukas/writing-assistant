@@ -11,7 +11,6 @@ class ConfigManager:
 
     DEFAULT_CONFIG = {
         "theme": "dark",
-        "font_size": 11,
         "default_tone": "Μόνο διόρθωση γραμματικής και ορθογραφίας",
         "auto_convert": True,
         "auto_tonify": False,

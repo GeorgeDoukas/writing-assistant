@@ -10,7 +10,7 @@ class SettingsDialog(tk.Toplevel):
     def __init__(self, parent, config, llm_assistant, app_callback=None):
         super().__init__(parent)
         self.title("Ρυθμίσεις")
-        self.geometry("350x500")
+        self.geometry("350x380")
         self.config_manager = config
         self.llm_assistant = llm_assistant
         self.app_callback = app_callback
@@ -34,18 +34,6 @@ class SettingsDialog(tk.Toplevel):
             width=20,
         )
         theme_combo.pack(anchor=tk.W, pady=(0, 15))
-
-        # Font Size
-        ttk.Label(frame, text="Μέγεθος γραμματοσειράς:").pack(anchor=tk.W, pady=(0, 5))
-        self.font_size_var = tk.IntVar(value=self.config_manager.get("font_size", 11))
-        font_spin = ttk.Spinbox(
-            frame,
-            from_=8,
-            to=24,
-            textvariable=self.font_size_var,
-            width=10,
-        )
-        font_spin.pack(anchor=tk.W, pady=(0, 15))
 
         # Default Tone
         ttk.Label(frame, text="Προεπιλεγμένος τόνος:").pack(anchor=tk.W, pady=(0, 5))
@@ -78,17 +66,6 @@ class SettingsDialog(tk.Toplevel):
         model_entry = ttk.Entry(frame, textvariable=self.model_var, width=40)
         model_entry.pack(anchor=tk.W, pady=(0, 20))
 
-        # Checkboxes
-        self.auto_convert_var = tk.BooleanVar(value=self.config_manager.get("auto_convert", True))
-        ttk.Checkbutton(frame, text="Αυτόματη μετατροπή", variable=self.auto_convert_var).pack(
-            anchor=tk.W, pady=(0, 5)
-        )
-
-        self.auto_tonify_var = tk.BooleanVar(value=self.config_manager.get("auto_tonify", False))
-        ttk.Checkbutton(frame, text="Αυτόματη Βελτίωση (5 δευτερόλεπτα)", variable=self.auto_tonify_var).pack(
-            anchor=tk.W, pady=(0, 20)
-        )
-
         # Test Connection Button
         ttk.Button(frame, text="Δοκιμάστε σύνδεση", command=self._test_connection).pack(anchor=tk.W, pady=(0, 10))
 
@@ -115,13 +92,10 @@ class SettingsDialog(tk.Toplevel):
         """Save settings and close."""
         try:
             self.config_manager.set("theme", self.theme_var.get())
-            self.config_manager.set("font_size", self.font_size_var.get())
             self.config_manager.set("default_tone", self.tone_var.get())
             self.config_manager.set("llm_endpoint", self.endpoint_var.get())
             self.config_manager.set("llm_model", self.model_var.get())
             self.config_manager.set("llm_api_key", self.config_manager.get("llm_api_key", "random-api-key"))
-            self.config_manager.set("auto_convert", self.auto_convert_var.get())
-            self.config_manager.set("auto_tonify", self.auto_tonify_var.get())
             self.config_manager.save()
             
             # Update LLM settings
@@ -157,7 +131,7 @@ class ToneExamplesDialog(tk.Toplevel):
 
     def __init__(self, parent, llm_assistant, initial_text=""):
         super().__init__(parent)
-        self.title("Παραδείγματα τόνων")
+        self.title("Παραδείγματα διαφορετικών τόνων")
         self.geometry("1000x700")
         self.llm_assistant = llm_assistant
         self.examples = {}

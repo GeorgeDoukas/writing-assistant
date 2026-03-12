@@ -1,238 +1,22 @@
-import json
-import os
-import re
+import ctypes
+import platform
+import subprocess
 import threading
 import tkinter as tk
-import urllib.error
-import urllib.request
 from tkinter import messagebox, ttk
 
+_SYSTEM = platform.system()
+
+import converter
 from config import ConfigManager
+from converter import greeklish_to_greek
 from dialogs import SettingsDialog, ToneExamplesDialog
 from greeklish_editor import GreeklishProfileEditor
-
-
-GREEKLISH_MULTI = {
-    "ps": "ψ",
-    "ou": "ου",
-    "ai": "αι",
-    "ei": "ει",
-    "oi": "οι",
-    "au": "αυ",
-    "eu": "ευ",
-    "mp": "μπ",
-    "nt": "ντ",
-    "gk": "γκ",
-    "gg": "γγ",
-}
-
-GREEKLISH_SINGLE = {
-    "a": "α",
-    "b": "β",
-    "v": "β",
-    "g": "γ",
-    "d": "δ",
-    "e": "ε",
-    "z": "ζ",
-    "h": "η",
-    "8": "θ",
-    "i": "ι",
-    "k": "κ",
-    "l": "λ",
-    "m": "μ",
-    "n": "ν",
-    "3": "ξ",
-    "o": "ο",
-    "p": "π",
-    "r": "ρ",
-    "s": "σ",
-    "t": "τ",
-    "u": "υ",
-    "y": "υ",
-    "f": "φ",
-    "x": "χ",
-    "w": "ω",
-    "?": ";"
-}
-
-TONE_MAPPING = {
-    "Μόνο διόρθωση γραμματικής και ορθογραφίας": "correct grammar and spelling only, no tone changes",
-    "Επαγγελματικός αλλά φιλικός": "professional but friendly",
-    "Επίσημος": "formal",
-    "Χαλαρός": "casual",
-    "Ακαδημαϊκός": "academic",
-    "Πειστικός": "persuasive",
-}
-
-
-def _preserve_case(source: str, target: str) -> str:
-    if source.isupper():
-        return target.upper()
-    if source[:1].isupper():
-        return target[:1].upper() + target[1:]
-    return target
-
-
-def greeklish_to_greek(text: str) -> str:
-    # Backtick escape: `word` passes through as-is (backticks are stripped)
-    # e.g. "pws paei to `deployment` sto `cloud`" → "πώς πάει το deployment στο cloud"
-    PLACEHOLDER_PREFIX = "\x00PASSTHROUGH"
-    passthroughs: list[str] = []
-
-    def _stash(m: re.Match) -> str:
-        passthroughs.append(m.group(1))
-        return f"{PLACEHOLDER_PREFIX}{len(passthroughs) - 1}\x00"
-
-    escaped = re.sub(r"`([^`]*)`", _stash, text)
-
-    out = []
-    i = 0
-    while i < len(escaped):
-        # Restore placeholder
-        if escaped[i] == "\x00" and escaped[i:].startswith(PLACEHOLDER_PREFIX):
-            end = escaped.index("\x00", i + 1)
-            idx = int(escaped[i + len(PLACEHOLDER_PREFIX):end])
-            out.append(passthroughs[idx])
-            i = end + 1
-            continue
-        matched = False
-        for size in (2,):
-            chunk = escaped[i : i + size]
-            lower = chunk.lower()
-            if lower in GREEKLISH_MULTI:
-                out.append(_preserve_case(chunk, GREEKLISH_MULTI[lower]))
-                i += size
-                matched = True
-                break
-        if matched:
-            continue
-        ch = escaped[i]
-        lower = ch.lower()
-        if lower in GREEKLISH_SINGLE:
-            out.append(_preserve_case(ch, GREEKLISH_SINGLE[lower]))
-        else:
-            out.append(ch)
-        i += 1
-    return second_pass_corrections("".join(out))
-
-
-def second_pass_corrections(text: str) -> str:
-    corrected = text
-    corrected = re.sub(r"\bσ\b", "ς", corrected)
-    corrected = re.sub(r"σ([,.!?;:)\]»\s]|$)", r"ς\1", corrected)
-    corrected = re.sub(r"\bντε\b", "ντε", corrected)
-    corrected = corrected.replace(";;", ";")
-    return corrected
-
-
-
-
-class LLMAssistant:
-    def __init__(self):
-        self.OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
-        self.OPENAI_MODEL = os.getenv("OPENAI_MODEL", "llm_model")
-        self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "random-api-key")
-
-    def _invoke(self, system_prompt: str, user_text: str) -> str:
-        payload = json.dumps({
-            "model": self.OPENAI_MODEL,
-            "temperature": 0.2,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_text},
-            ],
-        }).encode()
-        # print(f"LLM Request Payload:\n{json.dumps(json.loads(payload), indent=2, ensure_ascii=False)}")
-        req = urllib.request.Request(
-            f"{self.OPENAI_BASE_URL.rstrip('/')}/chat/completions",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.OPENAI_API_KEY}",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read())
-        except urllib.error.URLError as exc:
-            raise RuntimeError(
-                f"Cannot reach LLM endpoint ({self.OPENAI_BASE_URL}).\n"
-                "Make sure LM Studio is running and a model is loaded, or set "
-                "OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL."
-            ) from exc
-        return data["choices"][0]["message"]["content"].strip()
-
-    def improve_greek(self, text: str, tone: str) -> str:
-        return self._invoke(
-            f"You are a professional Greek text editor. "
-            f"Fix grammar, syntax, and clarity while strictly preserving the original meaning. "
-            f"Apply a '{tone}' tone throughout. "
-            f"Return ONLY the corrected Greek text — no explanations, no markdown, no introductory phrases.",
-            text,
-        )
-
-    def improve_tone_grammar_orthography(self, text: str, tone: str) -> str:
-        # Handle special case: grammar only (no tone change)
-        if "grammar" in tone.lower() and "only" in tone.lower():
-            return self._invoke(
-                f"You are a professional Greek text editor and orthography specialist. "
-                f"1. Fix ONLY grammar, syntax, and clarity while strictly preserving the original meaning and tone. "
-                f"2. DO NOT change the writing tone or style. "
-                f"3. Add correct accent marks (tonifies) to every word that requires one, following the modern monotonic system. "
-                f"Return ONLY the improved Greek text — no explanations, no markdown, no introductory phrases.",
-                text,
-            )
-        else:
-            return self._invoke(
-                f"You are a professional Greek text editor and orthography specialist. "
-                f"1. Fix grammar, syntax, and clarity while strictly preserving the original meaning. "
-                f"2. Apply a '{tone}' tone throughout. "
-                f"3. Add correct accent marks (tonifies) to every word that requires one, following the modern monotonic system. "
-                f"Return ONLY the improved Greek text — no explanations, no markdown, no introductory phrases.",
-                text,
-            )
-
-    def tonify(self, text: str) -> str:
-        return self._invoke(
-            "You are a Greek orthography specialist. "
-            "Add the correct accent marks to every word that requires one, "
-            "following the modern monotonic system. "
-            "Do NOT change any word, word order, or punctuation — only add or correct accents. "
-            "Return ONLY the accented text — no explanations, no markdown.",
-            text,
-        )
-
-    def translate(self, text: str, source_lang: str, target_lang: str) -> str:
-        return self._invoke(
-            f"You are a professional translator. "
-            f"Translate the following text from {source_lang} to {target_lang}. "
-            f"Preserve the style, tone, and structure of the original as closely as possible. "
-            f"Return ONLY the translation — no explanations, no markdown, no introductory phrases.",
-            text,
-        )
-
-
-THEMES = {
-    "dark": {
-        "bg": "#121212",
-        "card": "#1E1E1E",
-        "fg": "#EDEDED",
-        "muted": "#9AA0A6",
-        "accent": "#90CAF9",
-    },
-    "light": {
-        "bg": "#F4F6F8",
-        "card": "#FFFFFF",
-        "fg": "#1F1F1F",
-        "muted": "#555555",
-        "accent": "#1976D2",
-    },
-}
+from llm import LLMAssistant
+from themes import THEMES, TONE_MAPPING, TONE_LABELS
 
 
 class WritingAssistantApp:
-    _FONT_SIZES = [10, 12, 14, 16, 18, 20]
-
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Ελληνικός Βοηθός Γραφής")
@@ -244,7 +28,7 @@ class WritingAssistantApp:
         width = self.config.get("window_width", 1380)
         height = self.config.get("window_height", 690)
         self.root.geometry(f"{width}x{height}")
-        self.root.minsize(1380, 690)
+        self.root.minsize(1430, 690)
         
         # Initialize LLM with config values
         self.llm = LLMAssistant()
@@ -256,8 +40,9 @@ class WritingAssistantApp:
         self.theme_name = self.config.get("theme", "dark")
         self.auto_convert_var = tk.BooleanVar(value=self.config.get("auto_convert", True))
         self.auto_tonify_var = tk.BooleanVar(value=self.config.get("auto_tonify", False))
+        self.auto_switch_var = tk.BooleanVar(value=self.config.get("auto_switch_window", False))
+        self.auto_switch_var.trace_add("write", lambda *_: self.config.set("auto_switch_window", self.auto_switch_var.get()))
         self._tonify_timer = None
-        self.font_size = self.config.get("font_size", 11)
         self._llm_running = False
 
         self.tone_var = tk.StringVar(value=self.config.get("default_tone", "Μόνο διόρθωση γραμματικής και ορθογραφίας"))
@@ -268,9 +53,8 @@ class WritingAssistantApp:
             self.config.get("active_greeklish_profile", "default")
         )
         if self.greeklish_profile:
-            global GREEKLISH_MULTI, GREEKLISH_SINGLE
-            GREEKLISH_MULTI = self.greeklish_profile.get("multi", GREEKLISH_MULTI)
-            GREEKLISH_SINGLE = self.greeklish_profile.get("single", GREEKLISH_SINGLE)
+            converter.GREEKLISH_MULTI = self.greeklish_profile.get("multi", converter.GREEKLISH_MULTI)
+            converter.GREEKLISH_SINGLE = self.greeklish_profile.get("single", converter.GREEKLISH_SINGLE)
         
         self.style = ttk.Style()
         self.style.theme_use("clam")
@@ -304,21 +88,13 @@ class WritingAssistantApp:
         title = ttk.Label(top, text="Ελληνικός Βοηθός Γραφής", font=("Segoe UI", 14, "bold"))
         title.pack(side=tk.LEFT)
 
+        ttk.Checkbutton(top, text="Εναλλαγή παραθύρου (Ctrl+Shift+C)", variable=self.auto_switch_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=(0, 10))
         ttk.Checkbutton(top, text="Αυτόματη μετατροπή", variable=self.auto_convert_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=10)
         ttk.Checkbutton(top, text="Αυτόματη Βελτίωση", variable=self.auto_tonify_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=(0, 10))
 
-        # Font size
-        font_frame = ttk.Frame(top)
-        font_frame.pack(side=tk.LEFT, padx=6)
-        ttk.Label(font_frame, text="Γραμματοσειρά:").pack(side=tk.LEFT)
-        ttk.Button(font_frame, text="−", width=2, command=self._font_decrease).pack(side=tk.LEFT)
-        self.font_size_label = ttk.Label(font_frame, text=str(self.font_size), width=3, anchor="center")
-        self.font_size_label.pack(side=tk.LEFT)
-        ttk.Button(font_frame, text="+", width=2, command=self._font_increase).pack(side=tk.LEFT)
-
         ttk.Button(top, text="Εναλλαγή θέματος (Ctrl+D)", command=self.toggle_theme).pack(side=tk.RIGHT, padx=(0, 8))
         ttk.Button(top, text="Ρυθμίσεις", command=self._open_settings).pack(side=tk.RIGHT, padx=(0, 8))
-        ttk.Button(top, text="Παραδείγματα τόνων", command=self._open_tone_examples).pack(side=tk.RIGHT, padx=(0, 8))
+        ttk.Button(top, text="Παραδείγματα διαφορετικών τόνων", command=self._open_tone_examples).pack(side=tk.RIGHT, padx=(0, 8))
         ttk.Button(top, text="Προφίλ Greeklish", command=self._open_greeklish_editor).pack(side=tk.RIGHT, padx=(0, 8))
 
         # ── Middle frame (expands to fill space) ──────────────────────────────
@@ -385,14 +161,7 @@ class WritingAssistantApp:
         tone_combo = ttk.Combobox(
             tone_frame,
             textvariable=self.tone_var,
-            values=[
-                "Μόνο διόρθωση γραμματικής και ορθογραφίας",
-                "Επαγγελματικός αλλά φιλικός",
-                "Επίσημος",
-                "Χαλαρός",
-                "Ακαδημαϊκός",
-                "Πειστικός",
-            ],
+            values=TONE_LABELS,
             state="readonly",
             width=45,
             style="Card.TCombobox",
@@ -430,7 +199,6 @@ class WritingAssistantApp:
         self.translate_btn.pack(side=tk.LEFT, padx=4)
 
         self.input_text.bind("<KeyRelease>", self._on_input_change)
-        self._update_text_font()
 
     def _apply_theme(self):
         theme = THEMES[self.theme_name]
@@ -509,25 +277,6 @@ class WritingAssistantApp:
     def _on_window_resize(self, event):
         pass
 
-    # ── Font helpers ─────────────────────────────────────────────────────────
-    def _update_text_font(self):
-        font = ("Segoe UI", self.font_size)
-        self.input_text.configure(font=font)
-        self.output_text.configure(font=font)
-        self.font_size_label.configure(text=str(self.font_size))
-
-    def _font_increase(self):
-        sizes = self._FONT_SIZES
-        if self.font_size < sizes[-1]:
-            self.font_size = sizes[sizes.index(self.font_size) + 1] if self.font_size in sizes else self.font_size + 2
-        self._update_text_font()
-
-    def _font_decrease(self):
-        sizes = self._FONT_SIZES
-        if self.font_size > sizes[0]:
-            self.font_size = sizes[sizes.index(self.font_size) - 1] if self.font_size in sizes else self.font_size - 2
-        self._update_text_font()
-
     # ── Clipboard / clear ────────────────────────────────────────────────────
     def _copy_output(self):
         text = self.output_text.get("1.0", tk.END).rstrip("\n")
@@ -535,6 +284,41 @@ class WritingAssistantApp:
             self.root.clipboard_clear()
             self.root.clipboard_append(text)
             self._set_status("Αντιγράφηκε στο πρόχειρο.")
+            if self.auto_switch_var.get():
+                self.root.after(100, self._switch_to_previous_window)
+
+    def _switch_to_previous_window(self):
+        if _SYSTEM == "Windows":
+            self._switch_previous_windows()
+        elif _SYSTEM == "Linux":
+            self._switch_previous_linux()
+
+    def _switch_previous_windows(self):
+        user32 = ctypes.windll.user32
+        GW_HWNDNEXT = 2
+        our_hwnd = user32.GetForegroundWindow()
+        prev_hwnd = user32.GetWindow(our_hwnd, GW_HWNDNEXT)
+        while prev_hwnd:
+            if user32.IsWindowVisible(prev_hwnd):
+                break
+            prev_hwnd = user32.GetWindow(prev_hwnd, GW_HWNDNEXT)
+        if prev_hwnd:
+            if user32.IsIconic(prev_hwnd):   # only restore if minimized, never touch maximized
+                user32.ShowWindow(prev_hwnd, 9)  # SW_RESTORE
+            user32.SetForegroundWindow(prev_hwnd)
+
+    def _switch_previous_linux(self):
+        try:
+            # _NET_CLIENT_LIST_STACKING: bottom→top; last entry is our (topmost) window
+            raw = subprocess.check_output(
+                ["xprop", "-root", "_NET_CLIENT_LIST_STACKING"], text=True
+            )
+            ids_str = raw.split("#", 1)[1]
+            win_ids = [int(x.strip().rstrip(","), 16) for x in ids_str.split() if x.strip().rstrip(",")]
+            if len(win_ids) >= 2:
+                subprocess.run(["xdotool", "windowactivate", "--sync", str(win_ids[-2])], check=False)
+        except Exception:
+            pass
 
     def _clear_input(self):
         self.input_text.delete("1.0", tk.END)
@@ -558,7 +342,7 @@ class WritingAssistantApp:
         text = self.input_text.get("1.0", tk.END).rstrip("\n")
         self._update_word_count(text)
         if self.auto_convert_var.get():
-            self.convert_text()
+            self.convert_text(source=text)
         # 5-second debounce for auto-tonify
         if self._tonify_timer is not None:
             self.root.after_cancel(self._tonify_timer)
@@ -571,8 +355,9 @@ class WritingAssistantApp:
         if self.auto_tonify_var.get() and not self._llm_running:
             self.improve_with_llm()
 
-    def convert_text(self):
-        source = self.input_text.get("1.0", tk.END).rstrip("\n")
+    def convert_text(self, source: str | None = None):
+        if source is None:
+            source = self.input_text.get("1.0", tk.END).rstrip("\n")
         converted = greeklish_to_greek(source)
         self.output_text.delete("1.0", tk.END)
         self.output_text.insert("1.0", converted)
@@ -658,15 +443,14 @@ class WritingAssistantApp:
         """Check if LLM is available and update connection status indicator."""
         def check():
             try:
-                self.llm._invoke("You are a helpful assistant.", "Hi")
+                self.llm.check_connection()
                 status = "[Online]"
                 self.root.after(0, lambda: self.connection_status_label.configure(text=status, foreground="#4CAF50"))
             except Exception:
                 status = "[Offline]"
                 self.root.after(0, lambda: self.connection_status_label.configure(text=status, foreground="#F44336"))
-        
-        thread = threading.Thread(target=check, daemon=True)
-        thread.start()
+
+        threading.Thread(target=check, daemon=True).start()
 
     def _on_closing(self):
         """Save window geometry and close the app."""

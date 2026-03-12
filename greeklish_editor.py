@@ -21,8 +21,8 @@ class GreeklishProfileEditor(tk.Toplevel):
         """Load the current profile or create default."""
         profile = self.config_manager.load_greeklish_profile(self.current_profile)
         if not profile:
-            # Import from app to get the defaults
-            from app import GREEKLISH_MULTI, GREEKLISH_SINGLE
+            # Import from converter to get the defaults
+            from converter import GREEKLISH_MULTI, GREEKLISH_SINGLE
             profile = {
                 "multi": GREEKLISH_MULTI.copy(),
                 "single": GREEKLISH_SINGLE.copy(),
