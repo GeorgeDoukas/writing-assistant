@@ -1,7 +1,7 @@
 {
   "theme": "dark",
-  "font_size": 11,
   "default_tone": "Μόνο διόρθωση γραμματικής και ορθογραφίας",
+  "auto_switch_window": true,
   "auto_convert": true,
   "auto_tonify": false,
   "llm_endpoint": "http://localhost:1234/v1",
@@ -55,5 +55,5 @@
         "?": ";"
       }
     }
-  }
+  },
 }
