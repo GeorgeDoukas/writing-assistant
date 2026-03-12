@@ -142,6 +142,7 @@ class LLMAssistant:
                 {"role": "user", "content": user_text},
             ],
         }).encode()
+        # print(f"LLM Request Payload:\n{json.dumps(json.loads(payload), indent=2, ensure_ascii=False)}")
         req = urllib.request.Request(
             f"{self.OPENAI_BASE_URL.rstrip('/')}/chat/completions",
             data=payload,
@@ -171,14 +172,25 @@ class LLMAssistant:
         )
 
     def improve_tone_grammar_orthography(self, text: str, tone: str) -> str:
-        return self._invoke(
-            f"You are a professional Greek text editor and orthography specialist. "
-            f"1. Fix grammar, syntax, and clarity while strictly preserving the original meaning. "
-            f"2. Apply a '{tone}' tone throughout. "
-            f"3. Add correct accent marks (tonifies) to every word that requires one, following the modern monotonic system. "
-            f"Return ONLY the improved Greek text — no explanations, no markdown, no introductory phrases.",
-            text,
-        )
+        # Handle special case: grammar only (no tone change)
+        if "grammar" in tone.lower() and "only" in tone.lower():
+            return self._invoke(
+                f"You are a professional Greek text editor and orthography specialist. "
+                f"1. Fix ONLY grammar, syntax, and clarity while strictly preserving the original meaning and tone. "
+                f"2. DO NOT change the writing tone or style. "
+                f"3. Add correct accent marks (tonifies) to every word that requires one, following the modern monotonic system. "
+                f"Return ONLY the improved Greek text — no explanations, no markdown, no introductory phrases.",
+                text,
+            )
+        else:
+            return self._invoke(
+                f"You are a professional Greek text editor and orthography specialist. "
+                f"1. Fix grammar, syntax, and clarity while strictly preserving the original meaning. "
+                f"2. Apply a '{tone}' tone throughout. "
+                f"3. Add correct accent marks (tonifies) to every word that requires one, following the modern monotonic system. "
+                f"Return ONLY the improved Greek text — no explanations, no markdown, no introductory phrases.",
+                text,
+            )
 
     def tonify(self, text: str) -> str:
         return self._invoke(
@@ -634,8 +646,9 @@ class WritingAssistantApp:
         SettingsDialog(self.root, self.config, self.llm, self)
 
     def _open_tone_examples(self):
-        """Open the Tone Examples dialog."""
-        ToneExamplesDialog(self.root, self.llm)
+        """Open the Tone Examples dialog with current text."""
+        current_text = self.output_text.get("1.0", tk.END).strip()
+        ToneExamplesDialog(self.root, self.llm, current_text)
 
     def _open_greeklish_editor(self):
         """Open the Greeklish Profile Editor dialog."""

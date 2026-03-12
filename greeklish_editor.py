@@ -48,7 +48,7 @@ class GreeklishProfileEditor(tk.Toplevel):
         profile_combo.bind("<<ComboboxSelected>>", self._on_profile_change)
 
         ttk.Button(top, text="Νέο", command=self._new_profile).pack(side=tk.LEFT, padx=2)
-        ttk.Button(top, text="Σώσε", command=self._save_profile).pack(side=tk.LEFT, padx=2)
+        ttk.Button(top, text="Αποθήκευση", command=self._save_profile).pack(side=tk.LEFT, padx=2)
         ttk.Button(top, text="Διαγραφή", command=self._delete_profile).pack(side=tk.LEFT, padx=2)
 
         # Notebook for tabs
@@ -66,7 +66,7 @@ class GreeklishProfileEditor(tk.Toplevel):
         self._build_mapping_tab(single_frame, "single")
 
         # Close button
-        ttk.Button(self, text="Κλείσε", command=self.destroy).pack(pady=10)
+        ttk.Button(self, text="Κλείσιμο", command=self.destroy).pack(pady=10)
 
     def _build_mapping_tab(self, parent, mapping_type):
         """Build a tab for editing mappings."""

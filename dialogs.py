@@ -144,7 +144,7 @@ class SettingsDialog(tk.Toplevel):
 
 
 class ToneExamplesDialog(tk.Toplevel):
-    """Show examples of each tone."""
+    """Show examples of each tone with selectable results."""
 
     TONES = {
         "Μόνο διόρθωση γραμματικής και ορθογραφίας": "correct grammar and spelling only, no tone changes",
@@ -155,162 +155,160 @@ class ToneExamplesDialog(tk.Toplevel):
         "Πειστικός": "persuasive",
     }
 
-    def __init__(self, parent, llm_assistant):
+    def __init__(self, parent, llm_assistant, initial_text=""):
         super().__init__(parent)
         self.title("Παραδείγματα τόνων")
-        self.geometry("900x550")
+        self.geometry("1000x700")
         self.llm_assistant = llm_assistant
         self.examples = {}
-        self.loading = set()
+        self.selected_tone = tk.StringVar()
+        self.input_text = initial_text
 
         self._build_ui()
-        self._auto_load_all_examples()
 
     def _build_ui(self):
-        """Build UI with tone list and example display."""
-        # Left panel: tone list
-        left_frame = ttk.Frame(self)
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=10, pady=10)
+        """Build UI with input and tone examples."""
+        # Top frame: Input text
+        input_frame = ttk.LabelFrame(self, text="Κείμενο προς βελτίωση", padding=10)
+        input_frame.pack(fill=tk.BOTH, expand=False, padx=10, pady=10)
 
-        ttk.Label(left_frame, text="Διαθέσιμοι τόνοι:", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        self.text_input = tk.Text(input_frame, wrap=tk.WORD, height=3, font=("Arial", 10))
+        self.text_input.pack(fill=tk.BOTH, expand=True)
+        if self.input_text:
+            self.text_input.insert("1.0", self.input_text)
 
-        # Listbox with scrollbar
-        list_frame = ttk.Frame(left_frame)
-        list_frame.pack(fill=tk.BOTH, expand=True)
+        # Button frame
+        button_frame = ttk.Frame(self)
+        button_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        ttk.Button(button_frame, text="Δημιουργία παραδειγμάτων", command=self._generate_examples).pack(side=tk.LEFT)
+        
+        # Status label
+        self.status_label = ttk.Label(button_frame, text="", font=("Arial", 9, "italic"), foreground="blue")
+        self.status_label.pack(side=tk.LEFT, padx=(20, 0))
 
-        scrollbar = ttk.Scrollbar(list_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # Main content frame
+        content_frame = ttk.Frame(self)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        self.tone_listbox = tk.Listbox(list_frame, width=25, yscrollcommand=scrollbar.set, font=("Arial", 9))
-        self.tone_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=self.tone_listbox.yview)
+        # Tones list on the left
+        left_frame = ttk.LabelFrame(content_frame, text="Διαθέσιμοι τόνοι", padding=10)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 10))
 
-        # Add tones to listbox
+        self.tone_var = tk.StringVar()
         for tone in self.TONES.keys():
-            self.tone_listbox.insert(tk.END, tone)
-            self.examples[tone] = "⏳ Φόρτωση..."
+            rb = ttk.Radiobutton(
+                left_frame,
+                text=tone,
+                variable=self.tone_var,
+                value=tone,
+                command=self._show_selected_example
+            )
+            rb.pack(anchor=tk.W, pady=5)
+        
+        # Set first tone as selected
+        if self.TONES.keys():
+            self.tone_var.set(list(self.TONES.keys())[0])
 
-        self.tone_listbox.bind("<<ListboxSelect>>", self._on_tone_select)
-        self.tone_listbox.select_set(0)
+        # Examples on the right
+        right_frame = ttk.LabelFrame(content_frame, text="Β Όταν κάνετε κλικ στον τόνο δείχνει το αποτέλεσμα", padding=10)
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # Right panel: example display
-        right_frame = ttk.Frame(self)
-        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.example_text = tk.Text(right_frame, wrap=tk.WORD, height=15, width=60, font=("Arial", 10))
+        self.example_text.pack(fill=tk.BOTH, expand=True)
+        self.example_text.config(state=tk.DISABLED)
 
-        ttk.Label(right_frame, text="Παράδειγμα:", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        # Button frame at bottom
+        bottom_frame = ttk.Frame(self)
+        bottom_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Button(bottom_frame, text="Αντιγραφή επιλογής", command=self._copy_selected).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(bottom_frame, text="Κλείσιμο", command=self.destroy).pack(side=tk.LEFT)
 
-        self.text = tk.Text(right_frame, wrap=tk.WORD, height=25, width=60, font=("Arial", 9))
-        self.text.pack(fill=tk.BOTH, expand=True)
-        self.text.config(state=tk.DISABLED)
-
-        # Display first tone
-        self._show_example()
-
-    def _load_examples(self):
-        """Load cached examples or mark for fetching."""
-        for tone in self.TONES.keys():
-            self.examples[tone] = "Κάντε κλικ για παράδειγμα..."
-
-    def _on_tone_select(self, event):
-        """Handle tone selection from listbox."""
-        selection = self.tone_listbox.curselection()
-        if selection:
-            self._show_example()
-
-    def _show_example(self):
-        """Display current example."""
-        selection = self.tone_listbox.curselection()
-        if not selection:
+    def _generate_examples(self):
+        """Generate tone examples for the input text."""
+        text = self.text_input.get("1.0", tk.END).strip()
+        if not text:
+            self.status_label.config(text="❌ Παρακαλώ εισάγετε κείμενο", foreground="red")
             return
-        tone = self.tone_listbox.get(selection[0])
-        self.text.config(state=tk.NORMAL)
-        self.text.delete("1.0", tk.END)
-        self.text.insert("1.0", self.examples.get(tone, "Φόρτωση..."))
-        self.text.config(state=tk.DISABLED)
+        
+        self.examples.clear()
+        self.status_label.config(text="⏳ Δημιουργία παραδειγμάτων...", foreground="blue")
+        self.update()
 
-    def _auto_load_all_examples(self):
-        """Automatically load all tone examples in background thread."""
-        thread = threading.Thread(target=self._fetch_all_examples_batch, daemon=True)
+        thread = threading.Thread(target=self._fetch_examples_for_text, args=(text,), daemon=True)
         thread.start()
 
-    def _fetch_all_examples_batch(self):
-        """Fetch all tone examples in one LLM call for speed."""
-        sample_text = "Γεία σας, θα ήθελα να συζητήσω το νέο πρόγραμμα που ξεκίνησε πρόσφατα."
+    def _fetch_examples_for_text(self, text):
+        """Fetch improved versions in parallel using threads."""
+        import threading
         
-        # Create batch request for all tones
-        prompt = f"""Rewrite this text in 6 different styles. Return ONLY the rewrites with these exact prefixes:
-
-professional_but_friendly: [rewrite]
-formal: [rewrite]
-casual: [rewrite]
-academic: [rewrite]
-persuasive: [rewrite]
-grammar_only: [rewrite]
-
-Text: "{sample_text}" """
-
-        try:
-            result = self.llm_assistant._invoke(prompt, "")
-            self._parse_batch_response(result)
-        except Exception as exc:
-            for tone in self.TONES.keys():
-                self.examples[tone] = f"❌ Σφάλμα: {str(exc)[:40]}"
-            self._show_example()
-
-    def _parse_batch_response(self, response):
-        """Parse batch response and update examples."""
-        tone_keys = {
-            "professional_but_friendly": "Επαγγελματικός αλλά φιλικός",
-            "formal": "Επίσημος",
-            "casual": "Περιστασιακός",
-            "academic": "Ακαδημαϊκός",
-            "persuasive": "Πειστικός",
-            "grammar_only": "Μόνο διόρθωση γραμματικής",
-        }
+        tones_list = list(self.TONES.keys())
+        threads = []
+        completed_count = [0]  # Use list to allow modification in nested function
         
-        try:
-            lines = response.strip().split('\n')
-            current_key = None
-            current_text = []
+        def fetch_single_tone(tone):
+            """Fetch a single tone example."""
+            try:
+                result = self.llm_assistant.improve_tone_grammar_orthography(text, tone)
+                self.examples[tone] = result.strip()
+            except Exception as exc:
+                self.examples[tone] = f"❌ Σφάλμα: {str(exc)[:50]}"
             
-            for line in lines:
-                line_stripped = line.strip()
-                
-                # Check if this line starts with a key
-                found_key = False
-                for key in tone_keys.keys():
-                    if line_stripped.lower().startswith(key + ":"):
-                        # Save previous key if any
-                        if current_key and current_key in tone_keys:
-                            text_content = ' '.join(current_text).strip()
-                            if text_content:
-                                self.examples[tone_keys[current_key]] = text_content
-                        
-                        # Start new key
-                        current_key = key
-                        # Extract text after the colon
-                        rest = line_stripped[len(key)+1:].strip()
-                        current_text = [rest] if rest else []
-                        found_key = True
-                        break
-                
-                # If not a new key, append to current text
-                if not found_key and current_key and line_stripped:
-                    current_text.append(line_stripped)
-            
-            # Save last key
-            if current_key and current_key in tone_keys:
-                text_content = ' '.join(current_text).strip()
-                if text_content:
-                    self.examples[tone_keys[current_key]] = text_content
-        except Exception as e:
-            pass
+            # Update progress
+            completed_count[0] += 1
+            self.after(0, self._update_progress, completed_count[0], len(tones_list))
         
-        # Fill any missing with placeholder
-        for gr_tone in self.TONES.keys():
-            if gr_tone not in self.examples or not self.examples[gr_tone]:
-                self.examples[gr_tone] = "⏳ Φόρτωση..."
+        # Start all threads in parallel
+        for tone in tones_list:
+            thread = threading.Thread(target=fetch_single_tone, args=(tone,), daemon=True)
+            threads.append(thread)
+            thread.start()
         
-        # Refresh display
-        self.loading.clear()
-        self._show_example()
+        # Wait for all threads to complete, then show final status
+        def wait_and_finish():
+            for thread in threads:
+                thread.join()
+            self.after(0, self._update_ui_after_generation)
+        
+        completion_thread = threading.Thread(target=wait_and_finish, daemon=True)
+        completion_thread.start()
+    
+    def _update_progress(self, completed, total):
+        """Update progress counter."""
+        self.status_label.config(
+            text=f"⏳ Φόρτωση: {completed}/{total} παραδείγματα...",
+            foreground="blue"
+        )
+        # Show example as soon as first one completes
+        if completed == 1:
+            self._show_selected_example()
+
+    def _update_ui_after_generation(self):
+        """Update UI after examples are generated."""
+        self.status_label.config(text="✅ Έτοιμα! Επιλέξτε έναν τόνο", foreground="green")
+        self._show_selected_example()
+
+    def _show_selected_example(self):
+        """Display the selected tone's example."""
+        tone = self.tone_var.get()
+        if not tone:
+            return
+        
+        example = self.examples.get(tone, "Δεν έχει παράδειγμα")
+        self.example_text.config(state=tk.NORMAL)
+        self.example_text.delete("1.0", tk.END)
+        self.example_text.insert("1.0", example)
+        self.example_text.config(state=tk.DISABLED)
+
+    def _copy_selected(self):
+        """Copy the selected example to clipboard."""
+        tone = self.tone_var.get()
+        if not tone or tone not in self.examples:
+            messagebox.showwarning("Προσοχή", "Δεν υπάρχει επιλεγμένο παράδειγμα")
+            return
+        
+        example = self.examples[tone]
+        self.clipboard_clear()
+        self.clipboard_append(example)
+        messagebox.showinfo("Αντιγραφή", "✅ Το παράδειγμα αντιγράφηκε!")
+
+
