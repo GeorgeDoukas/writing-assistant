@@ -1,12 +1,13 @@
 import tkinter as tk
 from tkinter import messagebox, ttk, simpledialog
 import json
+from themes import THEMES
 
 
 class GreeklishProfileEditor(tk.Toplevel):
     """Edit custom Greeklish to Greek character mappings."""
 
-    def __init__(self, parent, config_manager, app_callback=None):
+    def __init__(self, parent, config_manager, app_callback=None, theme_name="dark"):
         super().__init__(parent)
         self.title("Επεξεργασία προφίλ Greeklish")
         self.geometry("700x600")
@@ -14,7 +15,15 @@ class GreeklishProfileEditor(tk.Toplevel):
         self.app_callback = app_callback
         self.current_profile = config_manager.get("active_greeklish_profile", "default")
         self.mappings = self._load_current_profile()
+        self.theme_name = theme_name
+        self.style = ttk.Style()
+        
+        # Initialize defaults from converter
+        from converter import GREEKLISH_MULTI, GREEKLISH_SINGLE
+        self.default_multi = GREEKLISH_MULTI.copy()
+        self.default_single = GREEKLISH_SINGLE.copy()
 
+        self._apply_theme()
         self._build_ui()
 
     def _load_current_profile(self) -> dict:
@@ -28,6 +37,31 @@ class GreeklishProfileEditor(tk.Toplevel):
                 "single": GREEKLISH_SINGLE.copy(),
             }
         return profile
+
+    def _apply_theme(self):
+        """Apply the current theme to the dialog."""
+        theme = THEMES[self.theme_name]
+        self.configure(bg=theme["bg"])
+        self.style.configure("TFrame", background=theme["bg"])
+        self.style.configure("TLabel", background=theme["bg"], foreground=theme["fg"])
+        self.style.configure("TLabelFrame", background=theme["bg"], foreground=theme["fg"])
+        self.style.configure(
+            "TButton",
+            background=theme["card"],
+            foreground=theme["fg"],
+            bordercolor=theme["muted"],
+            darkcolor=theme["card"],
+            lightcolor=theme["card"],
+            relief="flat",
+            padding=(8, 4),
+        )
+        self.style.map(
+            "TButton",
+            background=[("active", theme["accent"]), ("disabled", theme["bg"])],
+            foreground=[("active", theme["bg"]), ("disabled", theme["muted"])],
+        )
+        self.style.configure("TCombobox", fieldbackground=theme["card"], background=theme["card"], foreground=theme["fg"])
+        self.style.map("TCombobox", fieldbackground=[("readonly", theme["card"])])
 
     def _build_ui(self):
         """Build the profile editor UI."""

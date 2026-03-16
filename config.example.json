@@ -1,7 +1,6 @@
 {
   "theme": "dark",
   "default_tone": "Μόνο διόρθωση γραμματικής και ορθογραφίας",
-  "auto_switch_window": false,
   "auto_convert": true,
   "auto_tonify": false,
   "llm_endpoint": "http://localhost:1234/v1",
@@ -11,6 +10,14 @@
   "window_height": 690,
   "last_language": "English",
   "active_greeklish_profile": "default",
+  "escape_character": "`",
+  "shortcuts": {
+    "clear_input": "Control-l",
+    "toggle_theme": "Control-d",
+    "convert_text": "Control-t",
+    "copy_output": "Control-Shift-c",
+    "improve_with_llm": "Control-i"
+  },
   "greeklish_profiles": {
     "default": {
       "multi": {
@@ -48,14 +55,13 @@
         "s": "σ",
         "t": "τ",
         "u": "υ",
-        "f": "φ",
-        "c": "χ",
-        "w": "ω",
-        "j": "ζ",
-        "q": "ω",
         "y": "υ",
-        "x": "χ"
+        "f": "φ",
+        "x": "χ",
+        "w": "ω",
+        "?": ";"
       }
     }
-  }
+  },
+  "auto_switch_window": true
 }

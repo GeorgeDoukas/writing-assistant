@@ -10,7 +10,7 @@ _SYSTEM = platform.system()
 import converter
 from config import ConfigManager
 from converter import greeklish_to_greek
-from dialogs import SettingsDialog, ToneExamplesDialog
+from dialogs import UnifiedSettingsDialog, ToneExamplesDialog
 from greeklish_editor import GreeklishProfileEditor
 from llm import LLMAssistant
 from themes import THEMES, TONE_MAPPING, TONE_LABELS
@@ -56,19 +56,24 @@ class WritingAssistantApp:
             converter.GREEKLISH_MULTI = self.greeklish_profile.get("multi", converter.GREEKLISH_MULTI)
             converter.GREEKLISH_SINGLE = self.greeklish_profile.get("single", converter.GREEKLISH_SINGLE)
         
+        # Load shortcuts and escape character from config (before building UI)
+        self.shortcuts = self.config.get("shortcuts", {
+            "clear_input": "Control-l",
+            "toggle_theme": "Control-d",
+            "convert_text": "Control-Return",
+            "copy_output": "Control-Shift-c",
+            "improve_with_llm": "Control-i",
+        })
+        self.escape_character = self.config.get("escape_character", "`")
+        
         self.style = ttk.Style()
         self.style.theme_use("clam")
         self._build_ui()
         self._apply_theme()
         
         # Keyboard shortcuts
-        self.root.bind("<Control-l>", lambda _e: self._clear_input())
-        self.root.bind("<Control-d>", lambda _e: self.toggle_theme())
-        self.root.bind("<Control-Return>", lambda _e: self.convert_text())
-        self.root.bind("<Control-Shift-c>", lambda _e: self._copy_output())
-        self.root.bind("<Control-Shift-C>", lambda _e: self._copy_output())
-        self.root.bind("<Control-i>", lambda _e: self.improve_with_llm())
-        self.root.bind("<Control-I>", lambda _e: self.improve_with_llm())
+        self._rebind_shortcuts()
+        self._update_button_labels()
         self.root.bind("<Configure>", self._on_window_resize)
         
         # Save window size on close
@@ -92,10 +97,10 @@ class WritingAssistantApp:
         ttk.Checkbutton(top, text="Αυτόματη μετατροπή", variable=self.auto_convert_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=10)
         ttk.Checkbutton(top, text="Αυτόματη Βελτίωση", variable=self.auto_tonify_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=(0, 10))
 
-        ttk.Button(top, text="Εναλλαγή θέματος (Ctrl+D)", command=self.toggle_theme).pack(side=tk.RIGHT, padx=(0, 8))
+        self.toggle_theme_btn = ttk.Button(top, text="Εναλλαγή θέματος (Ctrl+D)", command=self.toggle_theme)
+        self.toggle_theme_btn.pack(side=tk.RIGHT, padx=(0, 8))
         ttk.Button(top, text="Ρυθμίσεις", command=self._open_settings).pack(side=tk.RIGHT, padx=(0, 8))
         ttk.Button(top, text="Παραδείγματα διαφορετικών τόνων", command=self._open_tone_examples).pack(side=tk.RIGHT, padx=(0, 8))
-        ttk.Button(top, text="Προφίλ Greeklish", command=self._open_greeklish_editor).pack(side=tk.RIGHT, padx=(0, 8))
 
         # ── Middle frame (expands to fill space) ──────────────────────────────
         middle = ttk.Frame(self.container)
@@ -114,7 +119,8 @@ class WritingAssistantApp:
         input_header = ttk.Frame(left)
         input_header.pack(fill=tk.X)
         ttk.Label(input_header, text="Είσοδος Greeklish").pack(side=tk.LEFT)
-        ttk.Button(input_header, text="Κατάργηση (Ctrl+L)", command=self._clear_input).pack(side=tk.RIGHT)
+        self.clear_input_btn = ttk.Button(input_header, text="Κατάργηση (Ctrl+L)", command=self._clear_input)
+        self.clear_input_btn.pack(side=tk.RIGHT)
 
         self.input_text = tk.Text(left, wrap=tk.WORD, undo=True)
         self.input_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
@@ -124,7 +130,8 @@ class WritingAssistantApp:
         output_header = ttk.Frame(right)
         output_header.pack(fill=tk.X)
         ttk.Label(output_header, text="Ελληνική έξοδος").pack(side=tk.LEFT)
-        ttk.Button(output_header, text="Αντιγραφή (Ctrl+Shift+C)", command=self._copy_output).pack(side=tk.RIGHT)
+        self.copy_output_btn = ttk.Button(output_header, text="Αντιγραφή (Ctrl+Shift+C)", command=self._copy_output)
+        self.copy_output_btn.pack(side=tk.RIGHT)
 
         self.output_text = tk.Text(right, wrap=tk.WORD, undo=True)
         self.output_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
@@ -143,17 +150,19 @@ class WritingAssistantApp:
         self.connection_status_label = ttk.Label(footer, text="[Checking...]", font=("Segoe UI", 9))
         self.connection_status_label.pack(side=tk.LEFT, padx=(12, 0))
         
-        shortcuts_label = ttk.Label(
+        self.shortcuts_label = ttk.Label(
             footer,
             text="`word`: passthrough  |  Ctrl+I: βελτίωση  |  Ctrl+L: κατάργηση  |  Ctrl+Shift+C: αντιγραφή  |  Ctrl+D: θέμα",
             font=("Segoe UI", 9),
         )
-        shortcuts_label.pack(side=tk.RIGHT, padx=(8, 0))
+        self.shortcuts_label.pack(side=tk.RIGHT, padx=(8, 0))
+        self._update_shortcuts_display()
 
         # ── Action bar ───────────────────────────────────────────────────────
         actions = ttk.Frame(self.container)
         actions.pack(fill=tk.X, pady=(6, 0), side=tk.BOTTOM)
-        ttk.Button(actions, text="Μετατροπή (Ctrl+↵)", command=self.convert_text).pack(side=tk.LEFT)
+        self.convert_text_btn = ttk.Button(actions, text="Μετατροπή (Ctrl+↵)", command=self.convert_text)
+        self.convert_text_btn.pack(side=tk.LEFT)
 
         tone_frame = ttk.Frame(actions)
         tone_frame.pack(side=tk.LEFT, padx=8)
@@ -168,8 +177,8 @@ class WritingAssistantApp:
         )
         tone_combo.pack(side=tk.LEFT, padx=(4, 0))
 
-        self.llm_btn = ttk.Button(actions, text="LLM: Βελτίωση (Ctrl+I)", command=self.improve_with_llm)
-        self.llm_btn.pack(side=tk.LEFT, padx=8)
+        self.improve_llm_btn = ttk.Button(actions, text="LLM: Βελτίωση (Ctrl+I)", command=self.improve_with_llm)
+        self.improve_llm_btn.pack(side=tk.LEFT, padx=8)
 
         lang_frame = ttk.Frame(actions)
         lang_frame.pack(side=tk.LEFT, padx=8)
@@ -274,6 +283,66 @@ class WritingAssistantApp:
         self.theme_name = "light" if self.theme_name == "dark" else "dark"
         self._apply_theme()
 
+    def _rebind_shortcuts(self):
+        """Rebind keyboard shortcuts from config."""
+        # Helper function to create uppercase variant of shortcut
+        def to_uppercase_key(shortcut):
+            """Convert only the final key to uppercase, keep modifiers as-is."""
+            if '-' in shortcut:
+                parts = shortcut.rsplit('-', 1)
+                return f"{parts[0]}-{parts[1].upper()}"
+            return shortcut.upper()
+        
+        # Get all current bindings and unbind them to avoid conflicts
+        current_bindings = [
+            "<Control-l>", "<Control-d>", "<Control-Return>", "<Control-Return>",
+            "<Control-Shift-c>", "<Control-Shift-C>",
+            "<Control-i>", "<Control-I>",
+            "<Control-f>",  # In case user had this
+        ]
+        for binding in current_bindings:
+            try:
+                self.root.unbind(binding)
+            except tk.TclError:
+                pass  # Binding doesn't exist, ignore
+        
+        # Also unbind entries from current shortcuts config
+        for shortcut in self.shortcuts.values():
+            if shortcut:
+                try:
+                    self.root.unbind(f"<{shortcut}>")
+                except tk.TclError:
+                    pass
+                # Also unbind uppercase variant
+                uppercase = to_uppercase_key(shortcut)
+                if shortcut != uppercase:
+                    try:
+                        self.root.unbind(f"<{uppercase}>")
+                    except tk.TclError:
+                        pass
+        
+        # Bind new shortcuts from config
+        if self.shortcuts.get("clear_input"):
+            self.root.bind(f"<{self.shortcuts['clear_input']}>", lambda _e: self._clear_input())
+        if self.shortcuts.get("toggle_theme"):
+            self.root.bind(f"<{self.shortcuts['toggle_theme']}>", lambda _e: self.toggle_theme())
+        if self.shortcuts.get("convert_text"):
+            self.root.bind(f"<{self.shortcuts['convert_text']}>", lambda _e: self.convert_text())
+        if self.shortcuts.get("copy_output"):
+            shortcut = self.shortcuts['copy_output']
+            self.root.bind(f"<{shortcut}>", lambda _e: self._copy_output())
+            # Also bind uppercase variant if it's different
+            uppercase_shortcut = to_uppercase_key(shortcut)
+            if shortcut != uppercase_shortcut:
+                self.root.bind(f"<{uppercase_shortcut}>", lambda _e: self._copy_output())
+        if self.shortcuts.get("improve_with_llm"):
+            shortcut = self.shortcuts['improve_with_llm']
+            self.root.bind(f"<{shortcut}>", lambda _e: self.improve_with_llm())
+            # Also bind uppercase variant
+            uppercase_shortcut = to_uppercase_key(shortcut)
+            if shortcut != uppercase_shortcut:
+                self.root.bind(f"<{uppercase_shortcut}>", lambda _e: self.improve_with_llm())
+
     def _on_window_resize(self, event):
         pass
 
@@ -337,6 +406,74 @@ class WritingAssistantApp:
         chars = len(text)
         self.word_count_label.configure(text=f"{words} λέξεις  {chars} χαρακτήρες")
 
+    def _update_shortcuts_display(self):
+        """Update the shortcuts label at the bottom with current bindings."""
+        escape_display = self.escape_character
+        
+        # Get shortcut labels with descriptions
+        shortcut_descriptions = {
+            "clear_input": "κατάργηση",
+            "toggle_theme": "θέμα",
+            "convert_text": "μετατροπή",
+            "copy_output": "αντιγραφή",
+            "improve_with_llm": "βελτίωση",
+        }
+        
+        # Build display string
+        parts = [f"{escape_display}: passthrough"]
+        for key, desc in shortcut_descriptions.items():
+            shortcut = self.shortcuts.get(key, "").replace("Control-", "Ctrl+")
+            # Uppercase the final key for visual clarity
+            if shortcut:
+                shortcut_parts = shortcut.rsplit("+", 1)
+                if len(shortcut_parts) == 2:
+                    shortcut = shortcut_parts[0] + "+" + shortcut_parts[1].upper()
+                else:
+                    shortcut = shortcut.upper()
+            if shortcut:
+                parts.append(f"{shortcut}: {desc}")
+        
+        label_text = "  |  ".join(parts)
+        self.shortcuts_label.configure(text=label_text)
+
+    def _update_button_labels(self):
+        """Update button labels with current shortcuts."""
+        # Helper to format shortcut for display
+        def format_shortcut(shortcut):
+            if not shortcut:
+                return ""
+            # Replace Control- with Ctrl+, handle special keys, and uppercase the final key
+            formatted = shortcut.replace("Control-", "Ctrl+").replace("Return", "↵")
+            # Uppercase the last character/key for visual clarity
+            if formatted:
+                parts = formatted.rsplit("+", 1)
+                if len(parts) == 2:
+                    formatted = parts[0] + "+" + parts[1].upper()
+                else:
+                    formatted = formatted.upper()
+            return formatted
+        
+        # Update button labels
+        if hasattr(self, 'clear_input_btn'):
+            shortcut = format_shortcut(self.shortcuts.get("clear_input", ""))
+            self.clear_input_btn.configure(text=f"Κατάργηση ({shortcut})" if shortcut else "Κατάργηση")
+        
+        if hasattr(self, 'copy_output_btn'):
+            shortcut = format_shortcut(self.shortcuts.get("copy_output", ""))
+            self.copy_output_btn.configure(text=f"Αντιγραφή ({shortcut})" if shortcut else "Αντιγραφή")
+        
+        if hasattr(self, 'toggle_theme_btn'):
+            shortcut = format_shortcut(self.shortcuts.get("toggle_theme", ""))
+            self.toggle_theme_btn.configure(text=f"Εναλλαγή θέματος ({shortcut})" if shortcut else "Εναλλαγή θέματος")
+        
+        if hasattr(self, 'convert_text_btn'):
+            shortcut = format_shortcut(self.shortcuts.get("convert_text", ""))
+            self.convert_text_btn.configure(text=f"Μετατροπή ({shortcut})" if shortcut else "Μετατροπή")
+        
+        if hasattr(self, 'improve_llm_btn'):
+            shortcut = format_shortcut(self.shortcuts.get("improve_with_llm", ""))
+            self.improve_llm_btn.configure(text=f"LLM: Βελτίωση ({shortcut})" if shortcut else "LLM: Βελτίωση")
+
     # ── Input change ─────────────────────────────────────────────────────────
     def _on_input_change(self, _event=None):
         text = self.input_text.get("1.0", tk.END).rstrip("\n")
@@ -358,13 +495,13 @@ class WritingAssistantApp:
     def convert_text(self, source: str | None = None):
         if source is None:
             source = self.input_text.get("1.0", tk.END).rstrip("\n")
-        converted = greeklish_to_greek(source)
+        converted = greeklish_to_greek(source, self.escape_character)
         self.output_text.delete("1.0", tk.END)
         self.output_text.insert("1.0", converted)
 
     # ── LLM helpers (threaded) ───────────────────────────────────────────────
     def _set_llm_buttons_state(self, state: str):
-        for btn in (self.llm_btn, self.translate_btn):
+        for btn in (self.improve_llm_btn, self.translate_btn):
             btn.configure(state=state)
 
     def _llm_action(self, action):
@@ -427,17 +564,13 @@ class WritingAssistantApp:
         self._llm_action(lambda: self.llm.translate(text=text, source_lang="Greek", target_lang=target_lang))
 
     def _open_settings(self):
-        """Open the Settings dialog."""
-        SettingsDialog(self.root, self.config, self.llm, self)
+        """Open the unified Settings dialog with tabs."""
+        UnifiedSettingsDialog(self.root, self.config, self.llm, self, self.theme_name)
 
     def _open_tone_examples(self):
         """Open the Tone Examples dialog with current text."""
         current_text = self.output_text.get("1.0", tk.END).strip()
-        ToneExamplesDialog(self.root, self.llm, current_text)
-
-    def _open_greeklish_editor(self):
-        """Open the Greeklish Profile Editor dialog."""
-        GreeklishProfileEditor(self.root, self.config, self)
+        ToneExamplesDialog(self.root, self.llm, current_text, self.theme_name)
 
     def _check_connection(self):
         """Check if LLM is available and update connection status indicator."""

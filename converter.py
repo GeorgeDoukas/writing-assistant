@@ -44,13 +44,18 @@ GREEKLISH_SINGLE: dict = {
 }
 
 # Pre-compiled regexes
-_RE_BACKTICK = re.compile(r"`([^`]*)`")
 _RE_SIGMA_WORD = re.compile(r"\bσ\b")
 _RE_SIGMA_BOUNDARY = re.compile(r"σ([,.!?;:)\]»\s]|$)")
 
 # Cached compiled greeklish substitution regex (rebuilt only when the profile changes)
 _greeklish_regex: re.Pattern | None = None
 _greeklish_regex_keys: tuple = ()
+
+
+def _build_escape_regex(escape_char: str) -> re.Pattern:
+    """Build regex for the escape character (passthrough)."""
+    escaped_char = re.escape(escape_char)
+    return re.compile(f"{escaped_char}([^{escaped_char}]*){escaped_char}")
 
 
 def _build_greeklish_regex() -> re.Pattern:
@@ -69,8 +74,8 @@ def _preserve_case(source: str, target: str) -> str:
     return target
 
 
-def greeklish_to_greek(text: str) -> str:
-    """Convert Greeklish text to Greek. Wrap words in backticks to pass them through unchanged."""
+def greeklish_to_greek(text: str, escape_character: str = "`") -> str:
+    """Convert Greeklish text to Greek. Wrap words in escape character to pass them through unchanged."""
     global _greeklish_regex, _greeklish_regex_keys
 
     passthroughs: list[str] = []
@@ -79,7 +84,8 @@ def greeklish_to_greek(text: str) -> str:
         passthroughs.append(m.group(1))
         return f"\x00PASSTHROUGH{len(passthroughs) - 1}\x00"
 
-    escaped = _RE_BACKTICK.sub(_stash, text)
+    escape_regex = _build_escape_regex(escape_character)
+    escaped = escape_regex.sub(_stash, text)
 
     current_keys = (tuple(GREEKLISH_MULTI), tuple(GREEKLISH_SINGLE))
     if _greeklish_regex is None or _greeklish_regex_keys != current_keys:

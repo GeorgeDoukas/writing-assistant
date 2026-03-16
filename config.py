@@ -21,6 +21,14 @@ class ConfigManager:
         "window_height": 690,
         "last_language": "English",
         "active_greeklish_profile": "default",
+        "escape_character": "`",
+        "shortcuts": {
+            "clear_input": "Control-l",
+            "toggle_theme": "Control-d",
+            "convert_text": "Control-Return",
+            "copy_output": "Control-Shift-c",
+            "improve_with_llm": "Control-i",
+        },
         "greeklish_profiles": {
             "default": {
                 "multi": {
