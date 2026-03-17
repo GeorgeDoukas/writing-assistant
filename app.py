@@ -39,10 +39,10 @@ class WritingAssistantApp:
         # Initialize variables from config
         self.theme_name = self.config.get("theme", "dark")
         self.auto_convert_var = tk.BooleanVar(value=self.config.get("auto_convert", True))
-        self.auto_tonify_var = tk.BooleanVar(value=self.config.get("auto_tonify", False))
+        self.auto_improve_var = tk.BooleanVar(value=self.config.get("auto_improve", False))
         self.auto_switch_var = tk.BooleanVar(value=self.config.get("auto_switch_window", False))
         self.auto_switch_var.trace_add("write", lambda *_: self.config.set("auto_switch_window", self.auto_switch_var.get()))
-        self._tonify_timer = None
+        self._improve_timer = None
         self._llm_running = False
 
         self.tone_var = tk.StringVar(value=self.config.get("default_tone", "Μόνο διόρθωση γραμματικής και ορθογραφίας"))
@@ -95,7 +95,7 @@ class WritingAssistantApp:
 
         ttk.Checkbutton(top, text="Εναλλαγή παραθύρου (Ctrl+Shift+C)", variable=self.auto_switch_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=(0, 10))
         ttk.Checkbutton(top, text="Αυτόματη μετατροπή", variable=self.auto_convert_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=10)
-        ttk.Checkbutton(top, text="Αυτόματη Βελτίωση", variable=self.auto_tonify_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Checkbutton(top, text="Αυτόματη Βελτίωση", variable=self.auto_improve_var, style="Card.TCheckbutton").pack(side=tk.LEFT, padx=(0, 10))
 
         self.toggle_theme_btn = ttk.Button(top, text="Εναλλαγή θέματος (Ctrl+D)", command=self.toggle_theme)
         self.toggle_theme_btn.pack(side=tk.RIGHT, padx=(0, 8))
@@ -480,16 +480,16 @@ class WritingAssistantApp:
         self._update_word_count(text)
         if self.auto_convert_var.get():
             self.convert_text(source=text)
-        # 5-second debounce for auto-tonify
-        if self._tonify_timer is not None:
-            self.root.after_cancel(self._tonify_timer)
-            self._tonify_timer = None
-        if self.auto_tonify_var.get():
-            self._tonify_timer = self.root.after(5000, self._auto_tonify_fire)
+        # 5-second debounce for auto-improve
+        if self._improve_timer is not None:
+            self.root.after_cancel(self._improve_timer)
+            self._improve_timer = None
+        if self.auto_improve_var.get():
+            self._improve_timer = self.root.after(5000, self._auto_improve_fire)
 
-    def _auto_tonify_fire(self):
-        self._tonify_timer = None
-        if self.auto_tonify_var.get() and not self._llm_running:
+    def _auto_improve_fire(self):
+        self._improve_timer = None
+        if self.auto_improve_var.get() and not self._llm_running:
             self.improve_with_llm()
 
     def convert_text(self, source: str | None = None):
@@ -538,11 +538,11 @@ class WritingAssistantApp:
             "Αντικαταστήστε με μεταβλητές περιβάλλοντος: OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL.",
         )
 
-    def tonify_text(self):
+    def improve_text(self):
         text = self.output_text.get("1.0", tk.END).rstrip("\n") or self.input_text.get("1.0", tk.END).rstrip("\n")
         if not text.strip():
             return
-        self._llm_action(lambda: self.llm.tonify(text=text))
+        self._llm_action(lambda: self.llm.improve(text=text))
 
     def improve_with_llm(self):
         """Improve text with tone, grammar, and orthography. Grammar-only mode skips tone changes."""

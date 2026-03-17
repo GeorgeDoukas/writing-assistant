@@ -1,28 +1,34 @@
 # writing-assistant
-A desktop writing assistant for Greek text that combines fast local Greeklish conversion with optional LLM-powered improvements.
+A lightweight desktop writing assistant for Greek text that combines fast local Greeklish conversion with optional LLM-powered improvements.
+
+## Key Advantage: No External Dependencies Required
+
+The core functionality works **completely offline with zero external packages** — just Python's built-in `tkinter`. Add LLM features (grammar improvement, translation) if you need them.
 
 ## Features
 
-### Text Conversion
-- **Greeklish → Greek**: Fast local conversion (no LLM required)
+### Core Conversion (No Dependencies)
+- **Greeklish → Greek**: Instant local conversion
   - Supports multi-character patterns (e.g., `ps` → `ψ`, `ou` → `ου`)
-  - Second-pass corrections (e.g., final sigma handling)
-  - Backtick passthrough for preserving text (`word` stays as-is)
+  - Second-pass corrections (final sigma handling: σ→ς)
+  - Backtick passthrough to preserve text (`` `word` `` stays as-is)
 - **Customizable Greeklish Profiles**: Create and edit your own conversion rules
-- **Auto-Convert Toggle**: Automatically convert text as you type
+- **Auto-Convert Toggle**: Automatically convert Greeklish as you type
 
-### LLM-Powered Features
-- **Grammar & Tone Improvement**: Enhance text with different styles:
+### Optional LLM-Powered Features
+Enhance your writing with AI (requires LLM setup):
+
+- **Grammar & Tone Improvement**: Six styles available:
   - Grammar & spelling only (Μόνο διόρθωση γραμματικής και ορθογραφίας)
   - Professional but friendly (Επαγγελματικός αλλά φιλικός)
   - Formal (Επίσημος)
   - Casual (Χαλαρός)
   - Academic (Ακαδημαϊκός)
   - Persuasive (Πειστικός)
-- **Auto-Tonify**: Automatically improve text every 5 seconds (toggle in top bar)
+- **Auto-Improve**: Automatically improve text every 5 seconds (toggle in top bar)
 - **Translation**: Translate to 11+ languages (English, French, German, Spanish, Italian, Portuguese, Dutch, Swedish, Japanese, Chinese, Russian)
 
-### UI & UX
+### UI & Usability
 - **Light/Dark Themes**: Toggle with `Ctrl+D`
 - **Customizable Settings**: Configure LLM endpoint, model, and defaults
 - **Tone Examples**: View real-world examples of each tone/style
@@ -31,58 +37,55 @@ A desktop writing assistant for Greek text that combines fast local Greeklish co
 ### Keyboard Shortcuts
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+Enter` | Convert text |
+| `Ctrl+Enter` | Convert Greeklish to Greek |
 | `Ctrl+I` | Improve text with LLM |
 | `Ctrl+L` | Clear input |
 | `Ctrl+Shift+C` | Copy output & auto-switch window (if enabled) |
 | `Ctrl+D` | Toggle light/dark theme |
 
-### Toggles (Top Bar)
-- **Αυτόματη μετατροπή** (Auto-Convert): Automatically convert Greeklish as you type
-- **Αυτόματη Βελτίωση** (Auto-Tonify): Improve Greek text every 5 seconds
+### Top Bar Toggles
+- **Αυτόματη μετατροπή** (Auto-Convert): Convert Greeklish as you type
+- **Αυτόματη Βελτίωση** (Auto-Improve): Improve Greek text every 5 seconds
 - **Εναλλαγή παραθύρου** (Auto Window Switch): Auto-switch to previous window on copy
 
 ## Setup
 
-### Installation
+### Installation (No External Packages Required for Core)
 ```bash
 git clone <repo>
 cd writing-assistant
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### Configuration
-Copy the example config to create your local settings:
-```bash
-cp config.example.json config.json
-```
-
-Edit `config.json` to customize:
-- **LLM Endpoint & Model**: For LLM features (improvement, translation)
-- **Theme**: "dark" or "light"
-- **Default Tone**: Default improvement style
-- **Greeklish Profile**: Custom Greeklish → Greek conversion rules
-- **Auto toggles**: Enable/disable auto-convert, auto-tonify, auto-switch
-
-### Running the App
-```bash
 python app.py
 ```
 
-### LLM Configuration
-To use LLM features (grammar improvement, translation), configure your LLM endpoint:
+That's it! The Greeklish converter runs with just Python's built-in libraries.
 
-1. Click **Ρυθμίσεις** (Settings) button
-2. Set **LLM Endpoint** (default: `http://localhost:1234/v1`)
-3. Set **LLM Model** (e.g., `neural-chat`, `mistral`, etc.)
-4. Click **Δοκιμάστε σύνδεση** (Test Connection)
+### (Optional) LLM Features Setup
+To use grammar improvement and translation features, you'll need to configure an LLM endpoint:
 
-**Recommended**: Use [LM Studio](https://lmstudio.ai/) for local LLM inference (no internet required)
+1. Clone and run the app as above
+2. Click **Ρυθμίσεις** (Settings) button
+3. Set **LLM Endpoint** (default: `http://localhost:1234/v1`)
+4. Set **LLM Model** (e.g., `neural-chat`, `mistral`, etc.)
+5. Click **Δοκιμάστε σύνδεση** (Test Connection)
 
-### Settings
-- **Theme**: Choose dark or light mode
-- **Default Tone**: Set your preferred tone for improvements
+**Quick Option**: Use [LM Studio](https://lmstudio.ai/) for local LLM inference (no internet required)
+
+### (Optional) Virtual Environment Setup
+For isolated Python environments:
+```bash
+python -m venv .venv
+.venv\Scripts\activate  # On Windows
+source .venv/bin/activate  # On macOS/Linux
+python app.py
+```
+
+### Configuration
+Edit `config.json` to customize settings:
+- **Theme**: "dark" or "light"
+- **Default Tone**: Default improvement style (for LLM features)
 - **LLM Endpoint**: OpenAI-compatible API endpoint
 - **LLM Model**: Name of the model to use
+- **Greeklish Profile**: Custom Greeklish → Greek conversion rules
+- **Auto toggles**: Enable/disable auto-convert, auto-improve, auto-switch
+
+Copy `config.example.json` to `config.json` to get started.
